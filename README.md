@@ -4,6 +4,8 @@ Turn your phone into a wireless trackpad for your Mac. No app to install on
 the phone — just open a page in its browser (or scan a QR code) over your
 home Wi-Fi.
 
+Built with Claude Code
+
 ## How it works
 
 `mouse_server.py` runs a small local web server on your Mac. It serves a
