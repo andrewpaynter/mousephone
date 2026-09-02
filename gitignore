@@ -1,0 +1,12 @@
+# Build artifacts from build.sh / py2app (setup.py)
+build_env/
+build/
+dist/
+*.egg-info/
+
+# Python
+__pycache__/
+*.pyc
+
+# macOS
+.DS_Store
