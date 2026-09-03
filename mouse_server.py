@@ -6,7 +6,7 @@ Run this on your Mac, then open the printed URL in your phone's browser
 (while on the same Wi-Fi network) to use your phone as a trackpad.
 
 Setup:
-    pip3 install aiohttp pyobjc-framework-Quartz "qrcode[pil]"
+    pip3 install aiohttp pyobjc-framework-Quartz "qrcode[pil]" rumps
 
 Run:
     python3 mouse_server.py
@@ -58,6 +58,12 @@ try:
     import qrcode
 except ImportError:
     print("Missing dependency. Install with:\n  pip3 install \"qrcode[pil]\"")
+    sys.exit(1)
+
+try:
+    import rumps
+except ImportError:
+    print("Missing dependency. Install with:\n  pip3 install rumps")
     sys.exit(1)
 
 
@@ -372,11 +378,33 @@ def main():
     print("to this app in System Settings > Privacy & Security > Accessibility")
     print("=" * 50)
 
-    # Show the QR code (ASCII in the terminal if there is one, and an
-    # image window either way — a double-clicked .app has no terminal).
+    # Run the web/WebSocket server on a background thread. handle_signals=False
+    # is required here — aiohttp's signal handling only works on the main
+    # thread, which we're reserving for the Cocoa run loop below.
+    def _run_server():
+        web.run_app(app, host="0.0.0.0", port=port, print=None, handle_signals=False)
+
+    threading.Thread(target=_run_server, daemon=True).start()
+
+    # Show the QR code once at launch.
     threading.Thread(target=show_qr, args=(url,), daemon=True).start()
 
-    web.run_app(app, host="0.0.0.0", port=port, print=None)
+    # Hand the main thread to a minimal Cocoa run loop via rumps. This is
+    # what makes the app respond to Launch Services at startup — without
+    # it, a double-clicked .app that never touches AppKit can trigger
+    # "You can't open Phone Mouse.app because it is not responding," even
+    # though the server itself is running fine. It also adds a menu bar
+    # icon so there's a visible way to re-show the QR code or quit.
+    class PhoneMouseApp(rumps.App):
+        def __init__(self):
+            super().__init__("🖱", quit_button="Quit")
+            self.menu = ["Show QR Code"]
+
+        @rumps.clicked("Show QR Code")
+        def show_qr_clicked(self, _):
+            threading.Thread(target=show_qr, args=(url,), daemon=True).start()
+
+    PhoneMouseApp().run()
 
 
 if __name__ == "__main__":

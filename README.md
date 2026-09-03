@@ -35,7 +35,7 @@ local IP address.
 Install the dependencies once:
 
 ```
-pip3 install aiohttp pyobjc-framework-Quartz "qrcode[pil]"
+pip3 install aiohttp pyobjc-framework-Quartz "qrcode[pil]" rumps
 ```
 
 Then pick one of two ways to run it:
@@ -73,7 +73,8 @@ normally.
 
 1. Launch the server (either option above). A window pops up with a QR
    code — and if you're running it from Terminal, an ASCII version prints
-   there too.
+   there too. A 🖱 icon also appears in your menu bar — click it for
+   "Show QR Code" (to re-open the code) and "Quit."
 2. On your phone, scan the QR code (or type the printed URL into your
    browser manually).
 3. Use the page as a trackpad:
@@ -96,13 +97,20 @@ You may need to quit and relaunch the server after granting permission.
 
 ## Troubleshooting
 
+- **"You can't open Phone Mouse.app because it is not responding"** — this
+  happens with older builds that never engaged a Cocoa run loop, so macOS's
+  Launch Services thought the app had hung at startup (even though the
+  server itself was running fine). Fixed by moving the server onto a
+  background thread and giving the app a real run loop + menu bar icon.
+  If you're seeing this, rebuild: `pip3 install rumps`, then rerun
+  `./build.sh` and replace the app in `/Applications` with the new one.
 - **QR code / URL doesn't load on the phone** — double-check both devices
   are on the same Wi-Fi network (not one on Wi-Fi and one on cellular data),
   and that no VPN is active on either device.
 - **Cursor doesn't move** — see Accessibility permission above.
 - **"Address already in use" on launch** — another copy of the server is
-  already running; quit it first, or edit the `port = 8765` line in
-  `mouse_server.py` to use a different port.
+  already running; quit it first (menu bar icon → Quit), or edit the
+  `port = 8765` line in `mouse_server.py` to use a different port.
 - **Feels too fast / slow** — open `mouse_server.py` and adjust
   `SENSITIVITY` and `SCROLL_SENSITIVITY` near the top of the `INDEX_HTML`
   section, then relaunch (and rebuild the `.app` if you're using one).

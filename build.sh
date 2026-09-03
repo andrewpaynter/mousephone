@@ -11,7 +11,7 @@ source build_env/bin/activate
 
 echo "Installing dependencies..."
 pip install --upgrade pip >/dev/null
-pip install aiohttp pyobjc-framework-Quartz "qrcode[pil]" py2app
+pip install aiohttp pyobjc-framework-Quartz "qrcode[pil]" rumps py2app
 
 echo "Building the app..."
 rm -rf build dist
