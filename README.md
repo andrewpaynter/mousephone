@@ -95,6 +95,16 @@ and enable the app that's running the server — **Terminal** if you used
 `Phone Mouse.command`, or **Phone Mouse** if you built and ran the `.app`.
 You may need to quit and relaunch the server after granting permission.
 
+The app checks this on launch — if it's not granted, you'll get an alert
+and Settings will open automatically. You can also re-check anytime from
+the 🖱 menu bar icon → **Check Accessibility Permission**.
+
+**After every rebuild of the `.app`,** re-grant this permission — each
+build produces a new signed binary, and macOS treats it as a different
+app. Remove the old "Phone Mouse" entry from the list first (select it,
+click **−**) rather than just re-toggling it, then add the new build back
+with **+**.
+
 ## Troubleshooting
 
 - **"You can't open Phone Mouse.app because it is not responding"** — this
@@ -107,7 +117,10 @@ You may need to quit and relaunch the server after granting permission.
 - **QR code / URL doesn't load on the phone** — double-check both devices
   are on the same Wi-Fi network (not one on Wi-Fi and one on cellular data),
   and that no VPN is active on either device.
-- **Cursor doesn't move** — see Accessibility permission above.
+- **Cursor doesn't move (page loads and connects fine)** — almost always
+  Accessibility permission. See the section above — after any rebuild, the
+  old permission entry goes stale and needs to be removed and re-added,
+  not just re-toggled.
 - **"Address already in use" on launch** — another copy of the server is
   already running; quit it first (menu bar icon → Quit), or edit the
   `port = 8765` line in `mouse_server.py` to use a different port.

@@ -17,6 +17,14 @@ echo "Building the app..."
 rm -rf build dist
 python3 setup.py py2app
 
+echo "Self-signing the app (ad-hoc)..."
+# Without any signature at all, macOS can be inconsistent about honoring
+# Accessibility permission across launches. Ad-hoc signing (a local
+# signature, no paid Apple developer account needed) makes that far more
+# reliable. Note: every rebuild still produces a new signature, so you'll
+# need to re-grant Accessibility permission after each rebuild regardless.
+codesign --force --deep --sign - "dist/Phone Mouse.app"
+
 deactivate
 
 echo ""
