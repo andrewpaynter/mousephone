@@ -32,6 +32,7 @@ OPTIONS = {
         "frozenlist",
         "charset_normalizer",
     ],
+    "iconfile": "assets/mousephone.icns",
     "plist": {
         "CFBundleName": "mousephone",
         "CFBundleDisplayName": "mousephone",
@@ -43,6 +44,7 @@ OPTIONS = {
 
 setup(
     app=APP,
+    data_files=[("assets", ["assets/menu_bar_icon.png"])],
     options={"py2app": OPTIONS},
     setup_requires=["py2app"],
 )
