@@ -31,6 +31,15 @@ mtime() {
   stat -f %m "$SCRIPT" 2>/dev/null
 }
 
+ensure_deps() {
+  if ! python3 -c "import aiohttp, Quartz, qrcode, rumps" 2>/dev/null; then
+    echo "Installing missing dependencies (one-time)..."
+    pip3 install aiohttp pyobjc-framework-Quartz "qrcode[pil]" rumps
+  fi
+}
+
+ensure_deps
+
 echo "=================================================="
 echo "Dev mode: running $SCRIPT directly, watching for changes."
 echo ""
