@@ -10,7 +10,7 @@ Usage:
 ...or manually:
     python3 -m venv build_env
     source build_env/bin/activate
-    pip install aiohttp pyobjc-framework-Quartz "qrcode[pil]" py2app
+    pip install aiohttp pyobjc-framework-Quartz "qrcode[pil]" rumps py2app
     python3 setup.py py2app
 
 Result: dist/Phone Mouse.app — drag it to /Applications and double-click
@@ -22,7 +22,7 @@ from setuptools import setup
 APP = ["mouse_server.py"]
 OPTIONS = {
     "argv_emulation": False,
-    "packages": ["aiohttp", "Quartz", "qrcode", "PIL"],
+    "packages": ["aiohttp", "Quartz", "qrcode", "PIL", "rumps"],
     "includes": [
         "multidict",
         "yarl",

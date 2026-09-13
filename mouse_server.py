@@ -6,7 +6,7 @@ Run this on your Mac, then open the printed URL in your phone's browser
 (while on the same Wi-Fi network) to use your phone as a trackpad.
 
 Setup:
-    pip3 install aiohttp pyobjc-framework-Quartz "qrcode[pil]"
+    pip3 install aiohttp pyobjc-framework-Quartz "qrcode[pil]" rumps
 
 Run:
     python3 mouse_server.py
@@ -39,6 +39,7 @@ try:
         CGEventGetLocation,
         CGMainDisplayID,
         CGDisplayBounds,
+        CGGetActiveDisplayList,
         kCGHIDEventTap,
         kCGEventMouseMoved,
         kCGEventLeftMouseDown,
@@ -60,14 +61,45 @@ except ImportError:
     print("Missing dependency. Install with:\n  pip3 install \"qrcode[pil]\"")
     sys.exit(1)
 
+try:
+    import rumps
+except ImportError:
+    print("Missing dependency. Install with:\n  pip3 install rumps")
+    sys.exit(1)
+
+
+def get_desktop_bounds():
+    """Union of every active display's bounds — not just the main one.
+    With an external monitor, the usable cursor area extends past the
+    main display's own width/height, in whichever direction the second
+    screen is arranged (often right and/or below)."""
+    max_displays = 16
+    err, display_ids, count = CGGetActiveDisplayList(max_displays, None, None)
+    if err != 0 or not display_ids:
+        bounds = CGDisplayBounds(CGMainDisplayID())
+        return (
+            bounds.origin.x,
+            bounds.origin.y,
+            bounds.origin.x + bounds.size.width,
+            bounds.origin.y + bounds.size.height,
+        )
+
+    min_x = min_y = float("inf")
+    max_x = max_y = float("-inf")
+    for display_id in display_ids[:count]:
+        b = CGDisplayBounds(display_id)
+        min_x = min(min_x, b.origin.x)
+        min_y = min(min_y, b.origin.y)
+        max_x = max(max_x, b.origin.x + b.size.width)
+        max_y = max(max_y, b.origin.y + b.size.height)
+    return min_x, min_y, max_x, max_y
+
 
 # ---------- Mouse control (macOS Quartz) ----------
 
 class Mouse:
     def __init__(self):
-        bounds = CGDisplayBounds(CGMainDisplayID())
-        self.width = bounds.size.width
-        self.height = bounds.size.height
+        self.min_x, self.min_y, self.max_x, self.max_y = get_desktop_bounds()
         self.x, self.y = self._current_location()
         self.dragging = False
 
@@ -76,8 +108,8 @@ class Mouse:
         return loc.x, loc.y
 
     def move(self, dx, dy):
-        self.x = min(max(self.x + dx, 0), self.width - 1)
-        self.y = min(max(self.y + dy, 0), self.height - 1)
+        self.x = min(max(self.x + dx, self.min_x), self.max_x - 1)
+        self.y = min(max(self.y + dy, self.min_y), self.max_y - 1)
         event_type = kCGEventLeftMouseDragged if self.dragging else kCGEventMouseMoved
         event = CGEventCreateMouseEvent(
             None, event_type, (self.x, self.y), kCGMouseButtonLeft
@@ -355,6 +387,27 @@ bindButton(rightBtn, 'right');
 """
 
 
+def is_accessibility_trusted():
+    """Check Accessibility permission without needing an extra pip package —
+    calls AXIsProcessTrusted() straight from the system framework via ctypes."""
+    try:
+        import ctypes
+
+        app_services = ctypes.cdll.LoadLibrary(
+            "/System/Library/Frameworks/ApplicationServices.framework/ApplicationServices"
+        )
+        return bool(app_services.AXIsProcessTrusted())
+    except Exception:
+        return True  # can't check — don't block startup over it
+
+
+def open_accessibility_settings():
+    subprocess.run(
+        ["open", "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility"],
+        check=False,
+    )
+
+
 def main():
     app = web.Application()
     app.router.add_get("/", index)
@@ -368,15 +421,70 @@ def main():
     print("Phone-as-Mouse server running")
     print(f"On your phone (same Wi-Fi), scan this QR code, or open:\n  {url}")
     print("=" * 50)
-    print("If the cursor doesn't move, grant Accessibility permission")
-    print("to this app in System Settings > Privacy & Security > Accessibility")
+
+    trusted = is_accessibility_trusted()
+    if not trusted:
+        print("Accessibility permission NOT granted — the cursor will not move.")
+        print("System Settings > Privacy & Security > Accessibility")
     print("=" * 50)
 
-    # Show the QR code (ASCII in the terminal if there is one, and an
-    # image window either way — a double-clicked .app has no terminal).
+    # Run the web/WebSocket server on a background thread. handle_signals=False
+    # is required here — aiohttp's signal handling only works on the main
+    # thread, which we're reserving for the Cocoa run loop below.
+    def _run_server():
+        web.run_app(app, host="0.0.0.0", port=port, print=None, handle_signals=False)
+
+    threading.Thread(target=_run_server, daemon=True).start()
+
+    # Show the QR code once at launch.
     threading.Thread(target=show_qr, args=(url,), daemon=True).start()
 
-    web.run_app(app, host="0.0.0.0", port=port, print=None)
+    # Hand the main thread to a minimal Cocoa run loop via rumps. This is
+    # what makes the app respond to Launch Services at startup — without
+    # it, a double-clicked .app that never touches AppKit can trigger
+    # "You can't open Phone Mouse.app because it is not responding," even
+    # though the server itself is running fine. It also adds a menu bar
+    # icon so there's a visible way to re-show the QR code or quit.
+    class PhoneMouseApp(rumps.App):
+        def __init__(self):
+            super().__init__("🖱" if trusted else "🖱⚠️", quit_button="Quit")
+            self.menu = ["Show QR Code", "Check Accessibility Permission"]
+
+        @rumps.clicked("Show QR Code")
+        def show_qr_clicked(self, _):
+            threading.Thread(target=show_qr, args=(url,), daemon=True).start()
+
+        @rumps.clicked("Check Accessibility Permission")
+        def check_permission_clicked(self, _):
+            if is_accessibility_trusted():
+                rumps.alert(title="Phone Mouse", message="Accessibility permission is granted. You're all set.")
+            else:
+                rumps.alert(
+                    title="Accessibility Permission Needed",
+                    message=(
+                        "Phone Mouse can't move the cursor without this.\n\n"
+                        "In the Accessibility list, remove any existing "
+                        "\u201cPhone Mouse\u201d entry first (select it, click \u2212), "
+                        "then add this app back and turn it on. Then quit and "
+                        "reopen Phone Mouse."
+                    ),
+                )
+                open_accessibility_settings()
+
+    if not trusted:
+        rumps.alert(
+            title="Accessibility Permission Needed",
+            message=(
+                "Phone Mouse can't move the cursor without this.\n\n"
+                "In the Accessibility list, remove any existing "
+                "\u201cPhone Mouse\u201d entry first (select it, click \u2212), "
+                "then add this app back and turn it on. Then quit and "
+                "reopen Phone Mouse."
+            ),
+        )
+        open_accessibility_settings()
+
+    PhoneMouseApp().run()
 
 
 if __name__ == "__main__":
