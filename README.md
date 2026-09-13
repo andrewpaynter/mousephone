@@ -99,10 +99,10 @@ expect to re-grant permission once after that build, as noted below.
 
 ## Using it
 
-1. Launch the server (either option above). A window pops up with a QR
-   code — and if you're running it from Terminal, an ASCII version prints
-   there too. A 🖱 icon also appears in your menu bar — click it for
-   "Show QR Code" (to re-open the code) and "Quit."
+1. Launch the server (either option above). A mousephone icon appears in
+   your menu bar — click it to see the QR code right there in the
+   dropdown (no separate window to open). If you're running it from
+   Terminal, an ASCII version also prints there.
 2. On your phone, scan the QR code (or type the printed URL into your
    browser manually).
 3. Use the page as a trackpad:
@@ -125,7 +125,7 @@ You may need to quit and relaunch the server after granting permission.
 
 The app checks this on launch — if it's not granted, you'll get an alert
 and Settings will open automatically. You can also re-check anytime from
-the 🖱 menu bar icon → **Check Accessibility Permission**.
+the mousephone menu bar icon → **Check Accessibility Permission**.
 
 **After every rebuild of the `.app`,** re-grant this permission — each
 build produces a new signed binary, and macOS treats it as a different

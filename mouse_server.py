@@ -16,12 +16,12 @@ whatever app you run this from) in:
     System Settings > Privacy & Security > Accessibility
 """
 
+import io
 import json
 import os
 import socket
 import subprocess
 import sys
-import tempfile
 import threading
 
 try:
@@ -66,6 +66,21 @@ try:
 except ImportError:
     print("Missing dependency. Install with:\n  pip3 install rumps")
     sys.exit(1)
+
+from AppKit import (
+    NSFont,
+    NSImage,
+    NSImageScaleProportionallyUpOrDown,
+    NSImageView,
+    NSMakeRect,
+    NSTextAlignmentCenter,
+    NSTextField,
+    NSView,
+)
+from Foundation import NSData
+
+ASSETS_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "assets")
+MENU_BAR_ICON = os.path.join(ASSETS_DIR, "menu_bar_icon.png")
 
 
 def get_desktop_bounds():
@@ -192,24 +207,43 @@ def print_qr_ascii(url):
     qr.print_ascii(invert=True)
 
 
-def show_qr_image(url):
-    """Open a QR code image window — needed because a double-clicked .app
-    has no visible Terminal to print ASCII art to."""
-    img = qrcode.make(url)
-    path = os.path.join(tempfile.gettempdir(), "phone_mouse_qr.png")
-    img.save(path)
-    subprocess.run(["open", path], check=False)
+def build_qr_menu_item(url):
+    """A menu item whose body is the QR code image itself, so scanning it
+    is just: click the menu bar icon. No separate window, no Preview."""
+    qr_img = qrcode.make(url, box_size=6, border=2)
+    buf = io.BytesIO()
+    qr_img.save(buf, format="PNG")
+    data = NSData.dataWithBytes_length_(buf.getvalue(), len(buf.getvalue()))
+    ns_image = NSImage.alloc().initWithData_(data)
 
+    qr_size = 176
+    padding = 14
+    label_h = 18
+    view_w = qr_size + padding * 2
+    view_h = qr_size + padding * 2 + label_h
 
-def show_qr(url):
-    try:
-        print_qr_ascii(url)
-    except Exception:
-        pass
-    try:
-        show_qr_image(url)
-    except Exception:
-        pass
+    view = NSView.alloc().initWithFrame_(NSMakeRect(0, 0, view_w, view_h))
+
+    image_view = NSImageView.alloc().initWithFrame_(
+        NSMakeRect(padding, label_h, qr_size, qr_size)
+    )
+    image_view.setImage_(ns_image)
+    image_view.setImageScaling_(NSImageScaleProportionallyUpOrDown)
+    view.addSubview_(image_view)
+
+    label = NSTextField.alloc().initWithFrame_(NSMakeRect(0, 0, view_w, label_h))
+    label.setStringValue_(url)
+    label.setBezeled_(False)
+    label.setDrawsBackground_(False)
+    label.setEditable_(False)
+    label.setSelectable_(True)
+    label.setAlignment_(NSTextAlignmentCenter)
+    label.setFont_(NSFont.systemFontOfSize_(11))
+    view.addSubview_(label)
+
+    item = rumps.MenuItem("")
+    item._menuitem.setView_(view)
+    return item
 
 
 def get_local_ip():
@@ -436,23 +470,24 @@ def main():
 
     threading.Thread(target=_run_server, daemon=True).start()
 
-    # Show the QR code once at launch.
-    threading.Thread(target=show_qr, args=(url,), daemon=True).start()
+    try:
+        print_qr_ascii(url)
+    except Exception:
+        pass
 
     # Hand the main thread to a minimal Cocoa run loop via rumps. This is
     # what makes the app respond to Launch Services at startup — without
     # it, a double-clicked .app that never touches AppKit can trigger
     # "You can't open mousephone.app because it is not responding," even
     # though the server itself is running fine. It also adds a menu bar
-    # icon so there's a visible way to re-show the QR code or quit.
+    # icon whose dropdown shows the QR code directly, so there's no need
+    # to open a separate image window to scan it.
     class MousephoneApp(rumps.App):
         def __init__(self):
-            super().__init__("🖱" if trusted else "🖱⚠️", quit_button="Quit")
-            self.menu = ["Show QR Code", "Check Accessibility Permission"]
-
-        @rumps.clicked("Show QR Code")
-        def show_qr_clicked(self, _):
-            threading.Thread(target=show_qr, args=(url,), daemon=True).start()
+            super().__init__(
+                "mousephone", icon=MENU_BAR_ICON, template=True, quit_button="Quit"
+            )
+            self.menu = [build_qr_menu_item(url), None, "Check Accessibility Permission"]
 
         @rumps.clicked("Check Accessibility Permission")
         def check_permission_clicked(self, _):
