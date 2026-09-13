@@ -1,5 +1,5 @@
 #!/bin/bash
-# One-time build script — turns mouse_server.py into dist/Phone Mouse.app
+# One-time build script — turns mouse_server.py into dist/mousephone.app
 # Run this ON YOUR MAC, from the folder containing mouse_server.py and setup.py.
 
 set -e
@@ -23,13 +23,13 @@ echo "Self-signing the app (ad-hoc)..."
 # signature, no paid Apple developer account needed) makes that far more
 # reliable. Note: every rebuild still produces a new signature, so you'll
 # need to re-grant Accessibility permission after each rebuild regardless.
-codesign --force --deep --sign - "dist/Phone Mouse.app"
+codesign --force --deep --sign - "dist/mousephone.app"
 
 deactivate
 
 echo ""
 echo "=================================================="
-echo "Done! Your app is at: dist/Phone Mouse.app"
+echo "Done! Your app is at: dist/mousephone.app"
 echo "Drag it into /Applications, then double-click to run."
 echo ""
 echo "First launch: macOS will warn it's from an unidentified"
