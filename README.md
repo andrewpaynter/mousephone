@@ -1,4 +1,4 @@
-# Phone Mouse
+# mousephone
 
 Turn your phone into a wireless trackpad for your Mac. No app to install on
 the phone — just open a page in its browser (or scan a QR code) over your
@@ -28,9 +28,9 @@ local IP address.
 | File | Purpose |
 |---|---|
 | `mouse_server.py` | The server itself — this is all you actually need to run |
-| `Phone Mouse.command` | Double-click launcher (quick option, no build step) |
+| `mousephone.command` | Double-click launcher (quick option, no build step) |
 | `setup.py` | Build config for packaging into a real `.app` |
-| `build.sh` | One-time script that builds `dist/Phone Mouse.app` |
+| `build.sh` | One-time script that builds `dist/mousephone.app` |
 
 ## Setup
 
@@ -44,19 +44,19 @@ Then pick one of two ways to run it:
 
 ### Option A — Quick (no build step)
 
-Double-click **`Phone Mouse.command`**. A Terminal window opens and runs the
+Double-click **`mousephone.command`**. A Terminal window opens and runs the
 server.
 
 If double-clicking does nothing, the executable flag was probably lost when
 the file was downloaded — fix it once with:
 
 ```
-chmod +x "Phone Mouse.command"
+chmod +x "mousephone.command"
 ```
 
 ### Option B — Build a real app
 
-Turns this into `Phone Mouse.app`, which you can put in `/Applications` and
+Turns this into `mousephone.app`, which you can put in `/Applications` and
 launch like any other Mac app (no Terminal window).
 
 ```
@@ -64,7 +64,7 @@ chmod +x build.sh
 ./build.sh
 ```
 
-This creates `dist/Phone Mouse.app`. Drag it into `/Applications`.
+This creates `dist/mousephone.app`. Drag it into `/Applications`.
 
 **First launch only:** since the app isn't signed with a paid Apple
 developer account, macOS will say it's from an "unidentified developer."
@@ -94,7 +94,7 @@ first time the cursor doesn't move, go to:
 **System Settings → Privacy & Security → Accessibility**
 
 and enable the app that's running the server — **Terminal** if you used
-`Phone Mouse.command`, or **Phone Mouse** if you built and ran the `.app`.
+`mousephone.command`, or **mousephone** if you built and ran the `.app`.
 You may need to quit and relaunch the server after granting permission.
 
 The app checks this on launch — if it's not granted, you'll get an alert
@@ -103,13 +103,13 @@ the 🖱 menu bar icon → **Check Accessibility Permission**.
 
 **After every rebuild of the `.app`,** re-grant this permission — each
 build produces a new signed binary, and macOS treats it as a different
-app. Remove the old "Phone Mouse" entry from the list first (select it,
+app. Remove the old "mousephone" entry from the list first (select it,
 click **−**) rather than just re-toggling it, then add the new build back
 with **+**.
 
 ## Troubleshooting
 
-- **"You can't open Phone Mouse.app because it is not responding"** — this
+- **"You can't open mousephone.app because it is not responding"** — this
   happens with older builds that never engaged a Cocoa run loop, so macOS's
   Launch Services thought the app had hung at startup (even though the
   server itself was running fine). Fixed by moving the server onto a

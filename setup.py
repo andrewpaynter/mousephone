@@ -1,5 +1,5 @@
 """
-py2app build script for Phone Mouse.
+py2app build script for mousephone.
 
 This must be run ON A MAC (py2app builds native Mac app bundles and
 can't cross-compile from another OS).
@@ -13,7 +13,7 @@ Usage:
     pip install aiohttp pyobjc-framework-Quartz "qrcode[pil]" rumps py2app
     python3 setup.py py2app
 
-Result: dist/Phone Mouse.app — drag it to /Applications and double-click
+Result: dist/mousephone.app — drag it to /Applications and double-click
 to run, no Terminal or Python install needed after that.
 """
 
@@ -33,9 +33,9 @@ OPTIONS = {
         "charset_normalizer",
     ],
     "plist": {
-        "CFBundleName": "Phone Mouse",
-        "CFBundleDisplayName": "Phone Mouse",
-        "CFBundleIdentifier": "com.local.phonemouse",
+        "CFBundleName": "mousephone",
+        "CFBundleDisplayName": "mousephone",
+        "CFBundleIdentifier": "com.local.mousephone",
         "CFBundleShortVersionString": "1.0.0",
         "LSUIElement": True,  # no Dock icon / app menu — runs quietly in the background
     },

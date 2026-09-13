@@ -229,7 +229,7 @@ INDEX_HTML = """<!DOCTYPE html>
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
-<title>Phone Mouse</title>
+<title>mousephone</title>
 <style>
   html, body {
     margin: 0; padding: 0; height: 100%; width: 100%;
@@ -442,10 +442,10 @@ def main():
     # Hand the main thread to a minimal Cocoa run loop via rumps. This is
     # what makes the app respond to Launch Services at startup — without
     # it, a double-clicked .app that never touches AppKit can trigger
-    # "You can't open Phone Mouse.app because it is not responding," even
+    # "You can't open mousephone.app because it is not responding," even
     # though the server itself is running fine. It also adds a menu bar
     # icon so there's a visible way to re-show the QR code or quit.
-    class PhoneMouseApp(rumps.App):
+    class MousephoneApp(rumps.App):
         def __init__(self):
             super().__init__("🖱" if trusted else "🖱⚠️", quit_button="Quit")
             self.menu = ["Show QR Code", "Check Accessibility Permission"]
@@ -457,16 +457,16 @@ def main():
         @rumps.clicked("Check Accessibility Permission")
         def check_permission_clicked(self, _):
             if is_accessibility_trusted():
-                rumps.alert(title="Phone Mouse", message="Accessibility permission is granted. You're all set.")
+                rumps.alert(title="mousephone", message="Accessibility permission is granted. You're all set.")
             else:
                 rumps.alert(
                     title="Accessibility Permission Needed",
                     message=(
-                        "Phone Mouse can't move the cursor without this.\n\n"
+                        "mousephone can't move the cursor without this.\n\n"
                         "In the Accessibility list, remove any existing "
-                        "\u201cPhone Mouse\u201d entry first (select it, click \u2212), "
+                        "\u201cmousephone\u201d entry first (select it, click \u2212), "
                         "then add this app back and turn it on. Then quit and "
-                        "reopen Phone Mouse."
+                        "reopen mousephone."
                     ),
                 )
                 open_accessibility_settings()
@@ -475,16 +475,16 @@ def main():
         rumps.alert(
             title="Accessibility Permission Needed",
             message=(
-                "Phone Mouse can't move the cursor without this.\n\n"
+                "mousephone can't move the cursor without this.\n\n"
                 "In the Accessibility list, remove any existing "
-                "\u201cPhone Mouse\u201d entry first (select it, click \u2212), "
+                "\u201cmousephone\u201d entry first (select it, click \u2212), "
                 "then add this app back and turn it on. Then quit and "
-                "reopen Phone Mouse."
+                "reopen mousephone."
             ),
         )
         open_accessibility_settings()
 
-    PhoneMouseApp().run()
+    MousephoneApp().run()
 
 
 if __name__ == "__main__":
