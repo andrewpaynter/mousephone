@@ -334,9 +334,74 @@ let maxTouchCount = 0;
 let startTime = 0;
 let moved = false;
 
+// --- Scroll momentum ---
+// While two fingers are moving we keep a short rolling history of scroll
+// deltas with timestamps. On lift-off we derive a release velocity from
+// that history and let it decay over a few frames, so the scroll carries
+// on a little past the fingers lifting instead of stopping dead.
+const MOMENTUM_HISTORY_MS = 80;   // how far back to look when computing release velocity
+const MOMENTUM_HALF_LIFE_MS = 120; // velocity halves this often while coasting
+const MOMENTUM_MIN_VELOCITY = 0.02; // px/ms — below this, stop
+const MOMENTUM_MAX_VELOCITY = 3;    // px/ms — clamp noisy release velocities
+let scrollHistory = [];
+let momentumFrame = null;
+
+function stopMomentum() {
+  if (momentumFrame !== null) {
+    cancelAnimationFrame(momentumFrame);
+    momentumFrame = null;
+  }
+}
+
+function clampVelocity(v) {
+  return Math.max(-MOMENTUM_MAX_VELOCITY, Math.min(MOMENTUM_MAX_VELOCITY, v));
+}
+
+function startMomentum(vx, vy) {
+  vx = clampVelocity(vx);
+  vy = clampVelocity(vy);
+  if (Math.abs(vx) < MOMENTUM_MIN_VELOCITY && Math.abs(vy) < MOMENTUM_MIN_VELOCITY) return;
+
+  stopMomentum();
+  let lastTime = performance.now();
+  const step = (now) => {
+    const dt = now - lastTime;
+    lastTime = now;
+    const decay = Math.pow(0.5, dt / MOMENTUM_HALF_LIFE_MS);
+    vx *= decay;
+    vy *= decay;
+    if (Math.abs(vx) < MOMENTUM_MIN_VELOCITY && Math.abs(vy) < MOMENTUM_MIN_VELOCITY) {
+      momentumFrame = null;
+      return;
+    }
+    send({
+      type: 'scroll',
+      dx: vx * dt * SCROLL_SENSITIVITY,
+      dy: vy * dt * SCROLL_SENSITIVITY,
+    });
+    momentumFrame = requestAnimationFrame(step);
+  };
+  momentumFrame = requestAnimationFrame(step);
+}
+
+function releaseVelocity() {
+  if (scrollHistory.length < 2) return { vx: 0, vy: 0 };
+  const first = scrollHistory[0];
+  const last = scrollHistory[scrollHistory.length - 1];
+  const dt = last.t - first.t;
+  if (dt <= 0) return { vx: 0, vy: 0 };
+  let sumDx = 0, sumDy = 0;
+  for (let i = 1; i < scrollHistory.length; i++) {
+    sumDx += scrollHistory[i].dx;
+    sumDy += scrollHistory[i].dy;
+  }
+  return { vx: sumDx / dt, vy: sumDy / dt };
+}
+
 trackpad.addEventListener('touchstart', (e) => {
   e.preventDefault();
   document.getElementById('hint').style.display = 'none';
+  stopMomentum();
   for (const t of e.changedTouches) {
     touches[t.identifier] = { x: t.clientX, y: t.clientY };
   }
@@ -345,6 +410,9 @@ trackpad.addEventListener('touchstart', (e) => {
   if (count === 1) {
     startTime = Date.now();
     moved = false;
+  }
+  if (count === 2) {
+    scrollHistory = [];
   }
 }, { passive: false });
 
@@ -375,10 +443,16 @@ trackpad.addEventListener('touchmove', (e) => {
     }
     if (n > 0) {
       moved = true;
+      const dx = dxSum / n, dy = dySum / n;
+      const now = performance.now();
+      scrollHistory.push({ dx, dy, t: now });
+      while (scrollHistory.length > 1 && now - scrollHistory[0].t > MOMENTUM_HISTORY_MS) {
+        scrollHistory.shift();
+      }
       send({
         type: 'scroll',
-        dx: (dxSum / n) * SCROLL_SENSITIVITY,
-        dy: (dySum / n) * SCROLL_SENSITIVITY,
+        dx: dx * SCROLL_SENSITIVITY,
+        dy: dy * SCROLL_SENSITIVITY,
       });
     }
   }
@@ -395,7 +469,12 @@ trackpad.addEventListener('touchend', (e) => {
     delete touches[t.identifier];
   }
   if (Object.keys(touches).length === 0) {
+    if (maxTouchCount === 2 && moved) {
+      const { vx, vy } = releaseVelocity();
+      startMomentum(vx, vy);
+    }
     maxTouchCount = 0;
+    scrollHistory = [];
   }
 }, { passive: false });
 
