@@ -29,6 +29,7 @@ local IP address.
 |---|---|
 | `mouse_server.py` | The server itself — this is all you actually need to run |
 | `mousephone.command` | Double-click launcher (quick option, no build step) |
+| `dev.sh` | Dev loop — runs the server directly and auto-restarts on save |
 | `setup.py` | Build config for packaging into a real `.app` |
 | `build.sh` | One-time script that builds `dist/mousephone.app` |
 
@@ -70,6 +71,31 @@ This creates `dist/mousephone.app`. Drag it into `/Applications`.
 developer account, macOS will say it's from an "unidentified developer."
 Right-click the app → **Open** → **Open** to allow it. After that it opens
 normally.
+
+## Development workflow
+
+If you're editing `mouse_server.py`, don't use `build.sh` for every change —
+building produces a freshly ad-hoc-signed `.app` each time, and macOS treats
+each signature as a different app, so you'd have to re-grant Accessibility
+permission after every single edit.
+
+Instead:
+
+```
+./dev.sh
+```
+
+This runs the server directly (like `mousephone.command`) and auto-restarts
+it whenever it detects a change to `mouse_server.py`. Grant Accessibility
+permission **once**, to your terminal app (Terminal/iTerm — whichever you
+run `dev.sh` from), not to `mousephone`. Because that's your terminal app's
+own permission grant and its signature never changes, it stays valid across
+every future edit, restart, and even new Terminal windows — no rebuild, no
+reinstall into `/Applications`, no re-granting.
+
+Reserve `build.sh` for when you actually want the packaged, double-click
+`.app` (e.g. to hand off or stop needing a Terminal window open) — and
+expect to re-grant permission once after that build, as noted below.
 
 ## Using it
 
@@ -134,4 +160,6 @@ with **+**.
 
 If you edit `mouse_server.py` and you're using the `.app` version, rerun
 `./build.sh` to pick up the changes — the app bundle is a snapshot taken at
-build time, not a live link to the script.
+build time, not a live link to the script. If you're actively iterating on
+`mouse_server.py`, use `./dev.sh` instead (see **Development workflow**
+above) so you're not rebuilding and re-granting permission on every change.
