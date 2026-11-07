@@ -14,6 +14,10 @@ set -e
 cd "$(dirname "$0")"
 
 SCRIPT="mouse_server.py"
+# A different port from the installed app (8765), so both can run at once.
+export MOUSEPHONE_PORT="${MOUSEPHONE_PORT:-8766}"
+# Labels the menu bar icon "DEV" so it's distinguishable from the installed app.
+export MOUSEPHONE_DEV=1
 PID=""
 
 cleanup() {
