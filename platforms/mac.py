@@ -6,6 +6,7 @@ UI, and a codesign-verified .app bundle swap for updates.
 import ctypes
 import io
 import os
+import socket
 import subprocess
 import sys
 import tempfile
@@ -62,6 +63,12 @@ from platforms.base import Installer, InputController, Platform, Tray, UpdateErr
 
 
 class MacPlatform(Platform):
+    def computer_name(self):
+        # The friendly name from Sharing settings ("Andrew's MacBook Air"),
+        # rather than the hostname ("Andrews-MacBook-Air.local").
+        result = subprocess.run(["scutil", "--get", "ComputerName"], capture_output=True, text=True)
+        return result.stdout.strip() or socket.gethostname().removesuffix(".local")
+
     def data_dir(self):
         return os.path.expanduser("~/Library/Application Support/mousephone")
 

@@ -184,7 +184,8 @@ Reserve `build.sh` for when you actually want the packaged, double-click
    dropdown (no separate window to open). If you're running it from
    Terminal, an ASCII version also prints there.
 2. On your phone, scan the QR code (or type the printed URL into your
-   browser manually).
+   browser manually). The page shows which computer it's connected to, so
+   it's clear which one you're controlling if several run mousephone.
 3. Use the page as a trackpad:
    - **One finger, drag** — move the cursor
    - **One finger, tap** — left click
