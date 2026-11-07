@@ -570,10 +570,20 @@ def main():
     # to open a separate image window to scan it.
     class MousephoneApp(rumps.App):
         def __init__(self):
+            # dev.sh sets MOUSEPHONE_DEV so its menu bar icon can be told
+            # apart from the installed app's when both are running.
+            dev = os.environ.get("MOUSEPHONE_DEV") == "1"
             super().__init__(
-                "mousephone", icon=MENU_BAR_ICON, template=True, quit_button="Quit"
+                "mousephone",
+                title="DEV" if dev else None,
+                icon=MENU_BAR_ICON,
+                template=True,
+                quit_button="Quit",
             )
-            self.menu = [build_qr_menu_item(url), None, "Check Accessibility Permission"]
+            items = [build_qr_menu_item(url), None, "Check Accessibility Permission"]
+            if dev:
+                items[:0] = [rumps.MenuItem(f"Dev server \u00b7 port {port}"), None]
+            self.menu = items
 
         @rumps.clicked("Check Accessibility Permission")
         def check_permission_clicked(self, _):
