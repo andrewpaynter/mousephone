@@ -53,6 +53,12 @@ class Tray(ABC):
     icon on Windows. Create it and call run() on the main thread."""
 
     @abstractmethod
+    def add_choice_menu(self, title, choices, selected, on_select):
+        """Add a submenu `title` listing `choices` (labels), with a check mark
+        on `selected`. Picking one moves the check mark to it and calls
+        on_select(label)."""
+
+    @abstractmethod
     def set_update_item(self, title, callback):
         """Add the update menu item, or change its title if it's already
         there. callback() is called with no arguments when it's clicked."""
@@ -131,6 +137,11 @@ class Platform(ABC):
 
     def __init__(self, assets_dir):
         self.assets_dir = assets_dir
+
+    @abstractmethod
+    def data_dir(self):
+        """Folder for the app's saved settings, in the OS's usual place for
+        per-user app data. Shared by the installed app and dev runs."""
 
     @abstractmethod
     def create_input(self):

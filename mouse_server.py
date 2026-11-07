@@ -40,6 +40,7 @@ except ImportError:
     sys.exit(1)
 
 import platforms
+import settings as speed_settings
 import updater
 
 # Bump this in a PR before running tools/release.sh. The Mac and Windows
@@ -56,7 +57,7 @@ async def index(request):
     return web.Response(text=INDEX_HTML, content_type="text/html")
 
 
-def make_websocket_handler(controller):
+def make_websocket_handler(controller, settings):
     async def websocket_handler(request):
         ws = web.WebSocketResponse()
         await ws.prepare(request)
@@ -70,7 +71,8 @@ def make_websocket_handler(controller):
 
                 t = data.get("type")
                 if t == "move":
-                    controller.move(data.get("dx", 0), data.get("dy", 0))
+                    scale = settings.pointer_scale
+                    controller.move(data.get("dx", 0) * scale, data.get("dy", 0) * scale)
                 elif t == "click":
                     controller.click(data.get("button", "left"))
                 elif t == "down":
@@ -78,7 +80,8 @@ def make_websocket_handler(controller):
                 elif t == "up":
                     controller.mouse_up()
                 elif t == "scroll":
-                    controller.scroll(data.get("dx", 0), data.get("dy", 0))
+                    scale = settings.scroll_scale
+                    controller.scroll(data.get("dx", 0) * scale, data.get("dy", 0) * scale)
                 elif t == "text":
                     controller.type_text(str(data.get("text", "")))
                 elif t == "key":
@@ -212,7 +215,7 @@ INDEX_HTML = """<!DOCTYPE html>
       <svg class="ring" viewBox="0 0 56 56"><rect x="2" y="2" width="52" height="52" rx="16"/></svg>
     </div>
     <div id="kbd-tip">Hold to open keyboard</div>
-    <div id="kbd-bar">Typing on Mac<div id="kbd-done">Done</div></div>
+    <div id="kbd-bar">Typing on computer<div id="kbd-done">Done</div></div>
     <div id="buttons">
       <div class="btn" id="left-btn">Left Click</div>
       <div class="btn" id="right-btn">Right Click</div>
@@ -225,8 +228,8 @@ const trackpad = document.getElementById('trackpad');
 const leftBtn = document.getElementById('left-btn');
 const rightBtn = document.getElementById('right-btn');
 
-const SENSITIVITY = 1.6;
-const SCROLL_SENSITIVITY = 1.2;
+// Movement is sent as raw finger pixels; the computer applies the pointer
+// and scroll speeds chosen in its tray/menu bar menu (see settings.py).
 
 let ws;
 function connect() {
@@ -292,8 +295,8 @@ function startMomentum(vx, vy) {
     }
     send({
       type: 'scroll',
-      dx: vx * dt * SCROLL_SENSITIVITY,
-      dy: vy * dt * SCROLL_SENSITIVITY,
+      dx: vx * dt,
+      dy: vy * dt,
     });
     momentumFrame = requestAnimationFrame(step);
   };
@@ -344,7 +347,7 @@ trackpad.addEventListener('touchmove', (e) => {
     const dx = t.clientX - prev.x;
     const dy = t.clientY - prev.y;
     if (Math.abs(dx) + Math.abs(dy) > 3) moved = true;
-    send({ type: 'move', dx: dx * SENSITIVITY, dy: dy * SENSITIVITY });
+    send({ type: 'move', dx, dy });
     touches[id] = { x: t.clientX, y: t.clientY };
   } else if (ids.length === 2) {
     let dxSum = 0, dySum = 0, n = 0;
@@ -365,11 +368,7 @@ trackpad.addEventListener('touchmove', (e) => {
       while (scrollHistory.length > 1 && now - scrollHistory[0].t > MOMENTUM_HISTORY_MS) {
         scrollHistory.shift();
       }
-      send({
-        type: 'scroll',
-        dx: dx * SCROLL_SENSITIVITY,
-        dy: dy * SCROLL_SENSITIVITY,
-      });
+      send({ type: 'scroll', dx, dy });
     }
   }
 }, { passive: false });
@@ -571,10 +570,11 @@ if (window.visualViewport) {
 def main():
     platform = platforms.current(ASSETS_DIR)
     controller = platform.create_input()
+    settings = speed_settings.Settings(platform.data_dir())
 
     app = web.Application()
     app.router.add_get("/", index)
-    app.router.add_get("/ws", make_websocket_handler(controller))
+    app.router.add_get("/ws", make_websocket_handler(controller, settings))
 
     # dev.sh sets MOUSEPHONE_PORT so a dev server can run alongside the
     # installed app without fighting over the port.
@@ -604,6 +604,9 @@ def main():
         pass
 
     tray = platform.create_tray(url, port, dev)
+    labels = [label for label, _ in speed_settings.SPEEDS]
+    tray.add_choice_menu("Pointer Speed", labels, settings.pointer_speed, settings.set_pointer_speed)
+    tray.add_choice_menu("Scroll Speed", labels, settings.scroll_speed, settings.set_scroll_speed)
 
     # Updates only apply to an installed build — when running from source
     # there's nothing to replace, so the update menu item is left out.

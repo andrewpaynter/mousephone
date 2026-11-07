@@ -241,9 +241,10 @@ with **+**.
   different port with `MOUSEPHONE_PORT=9000 python3 mouse_server.py`.
   `dev.sh` uses port 8766 by default, so it can run alongside the
   installed app (8765).
-- **Feels too fast / slow** — open `mouse_server.py` and adjust
-  `SENSITIVITY` and `SCROLL_SENSITIVITY` near the top of the `INDEX_HTML`
-  section, then relaunch (and rebuild the `.app` if you're using one).
+- **Feels too fast / slow** — pick a different **Pointer Speed** or
+  **Scroll Speed** from the menu bar / tray icon. It applies right away and
+  is remembered. (To change what "Normal" means, edit `BASE_POINTER` and
+  `BASE_SCROLL` in `settings.py`.)
 
 ## Rebuilding after changes
 
