@@ -5,25 +5,33 @@
 set -e
 cd "$(dirname "$0")"
 
+SIGNING_IDENTITY="mousephone Code Signing"
+if ! security find-certificate -c "$SIGNING_IDENTITY" >/dev/null 2>&1; then
+  echo "No \"$SIGNING_IDENTITY\" certificate in your keychain."
+  echo "Run tools/create_signing_cert.sh once first (or import your backup)."
+  exit 1
+fi
+
 echo "Setting up a temporary build environment..."
 python3 -m venv build_env
 source build_env/bin/activate
 
 echo "Installing dependencies..."
 pip install --upgrade pip >/dev/null
-pip install aiohttp pyobjc-framework-Quartz "qrcode[pil]" rumps py2app
+pip install aiohttp pyobjc-framework-Quartz "qrcode[pil]" rumps certifi py2app
 
 echo "Building the app..."
 rm -rf build dist
 python3 setup.py py2app
 
-echo "Self-signing the app (ad-hoc)..."
-# Without any signature at all, macOS can be inconsistent about honoring
-# Accessibility permission across launches. Ad-hoc signing (a local
-# signature, no paid Apple developer account needed) makes that far more
-# reliable. Note: every rebuild still produces a new signature, so you'll
-# need to re-grant Accessibility permission after each rebuild regardless.
-codesign --force --deep --sign - "dist/mousephone.app"
+echo "Signing the app..."
+# Signed with the same certificate every time (see
+# tools/create_signing_cert.sh) rather than ad-hoc. macOS ties
+# Accessibility permission to the signing identity, so a stable identity
+# means permission survives rebuilds and updates, and the in-app updater
+# only installs builds signed with this same certificate.
+codesign --force --deep --sign "$SIGNING_IDENTITY" "dist/mousephone.app"
+codesign --verify --deep --strict "dist/mousephone.app"
 
 deactivate
 
