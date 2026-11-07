@@ -531,7 +531,9 @@ def main():
     app.router.add_get("/", index)
     app.router.add_get("/ws", websocket_handler)
 
-    port = 8765
+    # dev.sh sets MOUSEPHONE_PORT so a dev server can run alongside the
+    # installed app without fighting over the port.
+    port = int(os.environ.get("MOUSEPHONE_PORT", 8765))
     ip = get_local_ip()
     url = f"http://{ip}:{port}"
 

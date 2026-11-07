@@ -150,8 +150,10 @@ with **+**.
   old permission entry goes stale and needs to be removed and re-added,
   not just re-toggled.
 - **"Address already in use" on launch** — another copy of the server is
-  already running; quit it first (menu bar icon → Quit), or edit the
-  `port = 8765` line in `mouse_server.py` to use a different port.
+  already running; quit it first (menu bar icon → Quit), or run it on a
+  different port with `MOUSEPHONE_PORT=9000 python3 mouse_server.py`.
+  `dev.sh` uses port 8766 by default, so it can run alongside the
+  installed app (8765).
 - **Feels too fast / slow** — open `mouse_server.py` and adjust
   `SENSITIVITY` and `SCROLL_SENSITIVITY` near the top of the `INDEX_HTML`
   section, then relaunch (and rebuild the `.app` if you're using one).
