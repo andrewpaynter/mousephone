@@ -33,7 +33,7 @@ start() {
 
 mtime() {
   # Newest change across all of the app's Python files, not just the entry point.
-  stat -f %m "$SCRIPT" updater.py platforms/*.py 2>/dev/null | sort -n | tail -1
+  stat -f %m *.py platforms/*.py 2>/dev/null | sort -n | tail -1
 }
 
 ensure_deps() {
@@ -74,7 +74,7 @@ while true; do
   if [ "$current" != "$last" ]; then
     echo ""
     echo "Change detected in $SCRIPT -- restarting..."
-    kill "$PID" 2>/dev/null
+    kill "$PID" 2>/dev/null || true  # may have already exited (crashed or killed)
     wait "$PID" 2>/dev/null || true
     last="$current"
     start

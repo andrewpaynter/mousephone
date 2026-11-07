@@ -31,6 +31,9 @@ class WindowsPlatform(Platform):
         super().__init__(assets_dir)
         _enable_dpi_awareness()
 
+    def data_dir(self):
+        return os.path.join(os.environ.get("APPDATA") or os.path.expanduser("~"), "mousephone")
+
     def create_input(self):
         return WindowsInput()
 
@@ -289,6 +292,7 @@ class WindowsTray(Tray):
         self.port = port
         self.dev = dev
         self.update_item = None  # (title, callback)
+        self.choice_menus = []  # dicts: title, choices, selected, on_select
         # Per port, so a dev server and the installed app don't overwrite
         # each other's QR code.
         self.qr_path = os.path.join(tempfile.gettempdir(), f"mousephone-qr-{port}.png")
@@ -311,6 +315,15 @@ class WindowsTray(Tray):
                       pystray.Menu.SEPARATOR]
         # default=True: also what a click on the tray icon itself does.
         items.append(pystray.MenuItem("Show QR Code", self._show_qr, default=True))
+        for menu in self.choice_menus:
+            items.append(pystray.MenuItem(menu["title"], pystray.Menu(*[
+                pystray.MenuItem(
+                    label, self._picker(menu, label),
+                    checked=lambda _item, m=menu, l=label: m["selected"] == l,
+                    radio=True,
+                )
+                for label in menu["choices"]
+            ])))
         if self.update_item:
             title, callback = self.update_item
             items.append(pystray.MenuItem(title, lambda: callback()))
@@ -319,6 +332,19 @@ class WindowsTray(Tray):
 
     def _show_qr(self):
         os.startfile(self.qr_path)
+
+    def _picker(self, menu, label):
+        def pick():
+            menu["selected"] = label
+            self.icon.update_menu()
+            menu["on_select"](label)
+        return pick
+
+    def add_choice_menu(self, title, choices, selected, on_select):
+        self.choice_menus.append(
+            {"title": title, "choices": list(choices), "selected": selected, "on_select": on_select}
+        )
+        self.icon.update_menu()
 
     def set_update_item(self, title, callback):
         self.update_item = (title, callback)

@@ -40,12 +40,13 @@ except ImportError:
     sys.exit(1)
 
 import platforms
+import settings as speed_settings
 import updater
 
 # Bump this in a PR before running tools/release.sh. The Mac and Windows
 # builds read it for their version metadata, and the updater compares it
 # to the latest release.
-__version__ = "1.2.0"
+__version__ = "1.3.0"
 
 ASSETS_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "assets")
 
@@ -56,10 +57,11 @@ async def index(request):
     return web.Response(text=INDEX_HTML, content_type="text/html")
 
 
-def make_websocket_handler(controller):
+def make_websocket_handler(controller, settings):
     async def websocket_handler(request):
         ws = web.WebSocketResponse()
         await ws.prepare(request)
+        accelerator = speed_settings.PointerAccelerator(settings)
 
         async for msg in ws:
             if msg.type == WSMsgType.TEXT:
@@ -70,7 +72,9 @@ def make_websocket_handler(controller):
 
                 t = data.get("type")
                 if t == "move":
-                    controller.move(data.get("dx", 0), data.get("dy", 0))
+                    dx, dy = data.get("dx", 0), data.get("dy", 0)
+                    scale = settings.pointer_scale * accelerator.gain(dx, dy, data.get("dt"))
+                    controller.move(dx * scale, dy * scale)
                 elif t == "click":
                     controller.click(data.get("button", "left"))
                 elif t == "down":
@@ -78,7 +82,8 @@ def make_websocket_handler(controller):
                 elif t == "up":
                     controller.mouse_up()
                 elif t == "scroll":
-                    controller.scroll(data.get("dx", 0), data.get("dy", 0))
+                    scale = settings.scroll_scale
+                    controller.scroll(data.get("dx", 0) * scale, data.get("dy", 0) * scale)
                 elif t == "text":
                     controller.type_text(str(data.get("text", "")))
                 elif t == "key":
@@ -212,7 +217,7 @@ INDEX_HTML = """<!DOCTYPE html>
       <svg class="ring" viewBox="0 0 56 56"><rect x="2" y="2" width="52" height="52" rx="16"/></svg>
     </div>
     <div id="kbd-tip">Hold to open keyboard</div>
-    <div id="kbd-bar">Typing on Mac<div id="kbd-done">Done</div></div>
+    <div id="kbd-bar">Typing on computer<div id="kbd-done">Done</div></div>
     <div id="buttons">
       <div class="btn" id="left-btn">Left Click</div>
       <div class="btn" id="right-btn">Right Click</div>
@@ -225,8 +230,8 @@ const trackpad = document.getElementById('trackpad');
 const leftBtn = document.getElementById('left-btn');
 const rightBtn = document.getElementById('right-btn');
 
-const SENSITIVITY = 1.6;
-const SCROLL_SENSITIVITY = 1.2;
+// Movement is sent as raw finger pixels; the computer applies the pointer
+// and scroll speeds chosen in its tray/menu bar menu (see settings.py).
 
 let ws;
 function connect() {
@@ -292,8 +297,8 @@ function startMomentum(vx, vy) {
     }
     send({
       type: 'scroll',
-      dx: vx * dt * SCROLL_SENSITIVITY,
-      dy: vy * dt * SCROLL_SENSITIVITY,
+      dx: vx * dt,
+      dy: vy * dt,
     });
     momentumFrame = requestAnimationFrame(step);
   };
@@ -319,7 +324,7 @@ trackpad.addEventListener('touchstart', (e) => {
   document.getElementById('hint').style.display = 'none';
   stopMomentum();
   for (const t of e.changedTouches) {
-    touches[t.identifier] = { x: t.clientX, y: t.clientY };
+    touches[t.identifier] = { x: t.clientX, y: t.clientY, t: e.timeStamp };
   }
   const count = Object.keys(touches).length;
   maxTouchCount = Math.max(maxTouchCount, count);
@@ -344,8 +349,12 @@ trackpad.addEventListener('touchmove', (e) => {
     const dx = t.clientX - prev.x;
     const dy = t.clientY - prev.y;
     if (Math.abs(dx) + Math.abs(dy) > 3) moved = true;
-    send({ type: 'move', dx: dx * SENSITIVITY, dy: dy * SENSITIVITY });
-    touches[id] = { x: t.clientX, y: t.clientY };
+    // dt (ms since the previous event) lets the computer apply pointer
+    // acceleration from the finger's real speed; Wi-Fi delivers messages
+    // too unevenly for it to time them itself.
+    const dt = e.timeStamp - prev.t;
+    send({ type: 'move', dx, dy, dt });
+    touches[id] = { x: t.clientX, y: t.clientY, t: e.timeStamp };
   } else if (ids.length === 2) {
     let dxSum = 0, dySum = 0, n = 0;
     for (const t of e.touches) {
@@ -353,7 +362,7 @@ trackpad.addEventListener('touchmove', (e) => {
       if (touches[id]) {
         dxSum += t.clientX - touches[id].x;
         dySum += t.clientY - touches[id].y;
-        touches[id] = { x: t.clientX, y: t.clientY };
+        touches[id] = { x: t.clientX, y: t.clientY, t: e.timeStamp };
         n++;
       }
     }
@@ -365,11 +374,7 @@ trackpad.addEventListener('touchmove', (e) => {
       while (scrollHistory.length > 1 && now - scrollHistory[0].t > MOMENTUM_HISTORY_MS) {
         scrollHistory.shift();
       }
-      send({
-        type: 'scroll',
-        dx: dx * SCROLL_SENSITIVITY,
-        dy: dy * SCROLL_SENSITIVITY,
-      });
+      send({ type: 'scroll', dx, dy });
     }
   }
 }, { passive: false });
@@ -571,10 +576,11 @@ if (window.visualViewport) {
 def main():
     platform = platforms.current(ASSETS_DIR)
     controller = platform.create_input()
+    settings = speed_settings.Settings(platform.data_dir())
 
     app = web.Application()
     app.router.add_get("/", index)
-    app.router.add_get("/ws", make_websocket_handler(controller))
+    app.router.add_get("/ws", make_websocket_handler(controller, settings))
 
     # dev.sh sets MOUSEPHONE_PORT so a dev server can run alongside the
     # installed app without fighting over the port.
@@ -604,6 +610,12 @@ def main():
         pass
 
     tray = platform.create_tray(url, port, dev)
+    for title, name in [
+        ("Pointer Speed", "pointer_speed"),
+        ("Pointer Acceleration", "acceleration"),
+        ("Scroll Speed", "scroll_speed"),
+    ]:
+        tray.add_choice_menu(title, settings.choices(name), settings.values[name], settings.setter(name))
 
     # Updates only apply to an installed build — when running from source
     # there's nothing to replace, so the update menu item is left out.

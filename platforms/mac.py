@@ -62,6 +62,9 @@ from platforms.base import Installer, InputController, Platform, Tray, UpdateErr
 
 
 class MacPlatform(Platform):
+    def data_dir(self):
+        return os.path.expanduser("~/Library/Application Support/mousephone")
+
     def create_input(self):
         return MacInput()
 
@@ -266,6 +269,20 @@ class MacTray(Tray):
         self.app.menu = items
         self.update_item = None
         self.timers = []
+
+    def add_choice_menu(self, title, choices, selected, on_select):
+        submenu = rumps.MenuItem(title)
+
+        def pick(sender):
+            for item in submenu.values():
+                item.state = int(item is sender)
+            on_select(sender.title)
+
+        for label in choices:
+            item = rumps.MenuItem(label, callback=pick)
+            item.state = int(label == selected)
+            submenu.add(item)
+        self.app.menu.insert_before(PERMISSION_ITEM, submenu)
 
     def set_update_item(self, title, callback):
         if self.update_item is None:
