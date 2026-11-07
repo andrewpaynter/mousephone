@@ -34,6 +34,9 @@ try:
     from Quartz import (
         CGEventCreateMouseEvent,
         CGEventCreateScrollWheelEvent,
+        CGEventCreateKeyboardEvent,
+        CGEventKeyboardSetUnicodeString,
+        CGEventSetFlags,
         CGEventPost,
         CGEventCreate,
         CGEventGetLocation,
@@ -178,6 +181,39 @@ class Mouse:
 mouse = Mouse()
 
 
+# ---------- Keyboard (macOS Quartz) ----------
+
+# Virtual key codes for the few non-character keys the phone sends.
+KEY_CODES = {"backspace": 51, "return": 36}
+
+
+class Keyboard:
+    def type_text(self, text):
+        """Type arbitrary text (accents, emoji, any language) by attaching
+        the characters to a synthetic key event, rather than mapping each
+        one to a physical key on a particular keyboard layout."""
+        for ch in text:
+            length = len(ch.encode("utf-16-le")) // 2  # emoji are 2 UTF-16 units
+            for key_down in (True, False):
+                event = CGEventCreateKeyboardEvent(None, 0, key_down)
+                CGEventSetFlags(event, 0)  # ignore any modifiers held on the Mac
+                CGEventKeyboardSetUnicodeString(event, length, ch)
+                CGEventPost(kCGHIDEventTap, event)
+
+    def press(self, key, count=1):
+        code = KEY_CODES.get(key)
+        if code is None:
+            return
+        for _ in range(max(1, min(int(count), 500))):
+            for key_down in (True, False):
+                event = CGEventCreateKeyboardEvent(None, code, key_down)
+                CGEventSetFlags(event, 0)
+                CGEventPost(kCGHIDEventTap, event)
+
+
+keyboard = Keyboard()
+
+
 # ---------- Web server ----------
 
 async def index(request):
@@ -206,6 +242,10 @@ async def websocket_handler(request):
                 mouse.mouse_up()
             elif t == "scroll":
                 mouse.scroll(data.get("dx", 0), data.get("dy", 0))
+            elif t == "text":
+                keyboard.type_text(str(data.get("text", "")))
+            elif t == "key":
+                keyboard.press(data.get("key"), data.get("count", 1))
         elif msg.type == WSMsgType.ERROR:
             break
 
@@ -284,21 +324,71 @@ INDEX_HTML = """<!DOCTYPE html>
     background: #111; color: #eee; font-family: -apple-system, sans-serif;
     overflow: hidden; touch-action: none; -webkit-user-select: none; user-select: none;
   }
+  /* Everything lives in #app, which JS sizes to the visual viewport so the
+     layout shrinks to fit above the phone's keyboard instead of being
+     covered by it. */
+  #app { position: fixed; top: 0; left: 0; right: 0; height: 100%; }
   #status {
-    position: fixed; top: 8px; left: 0; right: 0; text-align: center;
-    font-size: 13px; color: #888; z-index: 10;
+    position: absolute; top: 8px; left: 0; right: 0; text-align: center;
+    font-size: 13px; color: #888; z-index: 10; pointer-events: none;
   }
   #hint {
-    position: fixed; top: 50%; left: 0; right: 0; text-align: center;
+    position: absolute; top: 50%; left: 0; right: 0; text-align: center;
     font-size: 13px; color: #555; pointer-events: none;
   }
   #trackpad {
     position: absolute; top: 0; left: 0; right: 0; bottom: 70px;
     background: #1c1c1e;
   }
+  body.typing #trackpad { bottom: 118px; }
   #buttons {
-    position: fixed; bottom: 0; left: 0; right: 0; height: 70px;
+    position: absolute; bottom: 0; left: 0; right: 0; height: 70px;
     display: flex;
+  }
+
+  /* Keyboard toggle: opening takes a press-and-hold, closing a single tap. */
+  #kbd-btn {
+    position: absolute; top: 12px; right: 12px; width: 48px; height: 48px;
+    border-radius: 14px; background: #2c2c2e; border: 1px solid #444;
+    display: flex; align-items: center; justify-content: center;
+    color: #888; z-index: 20;
+  }
+  #kbd-btn svg.icon { width: 26px; height: 26px; }
+  #kbd-btn .ring {
+    position: absolute; inset: -4px; width: 56px; height: 56px;
+    pointer-events: none;
+  }
+  #kbd-btn .ring rect {
+    fill: none; stroke: #0a84ff; stroke-width: 3;
+    stroke-dasharray: 200; stroke-dashoffset: 200;
+  }
+  #kbd-btn.holding .ring rect {
+    stroke-dashoffset: 0; transition: stroke-dashoffset 500ms linear;
+  }
+  #kbd-btn.ready, body.typing #kbd-btn { color: #fff; background: #0a84ff; border-color: #0a84ff; }
+  #kbd-tip {
+    position: absolute; top: 68px; right: 12px; padding: 6px 10px;
+    border-radius: 8px; background: #3a3a3c; color: #ddd; font-size: 13px;
+    opacity: 0; transition: opacity 200ms; pointer-events: none; z-index: 20;
+  }
+  #kbd-tip.show { opacity: 1; }
+  #kbd-bar {
+    position: absolute; bottom: 70px; left: 0; right: 0; height: 48px;
+    display: none; align-items: center; justify-content: space-between;
+    padding: 0 0 0 16px; background: #2c2c2e; border-top: 1px solid #444;
+    font-size: 14px; color: #888;
+  }
+  body.typing #kbd-bar { display: flex; }
+  #kbd-done {
+    height: 100%; padding: 0 24px; display: flex; align-items: center;
+    color: #0a84ff; font-size: 17px; font-weight: 600;
+  }
+  /* Hidden but focusable: it has to be a real text field for the phone to
+     show its keyboard. 16px font stops iOS from zooming in on focus. */
+  #kbd-input {
+    position: fixed; top: 0; left: 0; width: 1px; height: 1px;
+    opacity: 0; border: 0; padding: 0; resize: none; font-size: 16px;
+    caret-color: transparent;
   }
   .btn {
     flex: 1; display: flex; align-items: center; justify-content: center;
@@ -310,11 +400,23 @@ INDEX_HTML = """<!DOCTYPE html>
 </style>
 </head>
 <body>
-  <div id="status">connecting…</div>
-  <div id="trackpad"><div id="hint">1 finger: move &middot; 2 fingers: scroll &middot; tap: click</div></div>
-  <div id="buttons">
-    <div class="btn" id="left-btn">Left Click</div>
-    <div class="btn" id="right-btn">Right Click</div>
+  <textarea id="kbd-input" autocomplete="off" autocapitalize="sentences"></textarea>
+  <div id="app">
+    <div id="status">connecting…</div>
+    <div id="trackpad"><div id="hint">1 finger: move &middot; 2 fingers: scroll &middot; tap: click</div></div>
+    <div id="kbd-btn" aria-label="Hold to open keyboard">
+      <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round">
+        <rect x="2.5" y="6" width="19" height="12" rx="2"/>
+        <path d="M6 9.5h.01M9 9.5h.01M12 9.5h.01M15 9.5h.01M18 9.5h.01M6 12.5h.01M18 12.5h.01M9 12.5h6M8 15h8"/>
+      </svg>
+      <svg class="ring" viewBox="0 0 56 56"><rect x="2" y="2" width="52" height="52" rx="16"/></svg>
+    </div>
+    <div id="kbd-tip">Hold to open keyboard</div>
+    <div id="kbd-bar">Typing on Mac<div id="kbd-done">Done</div></div>
+    <div id="buttons">
+      <div class="btn" id="left-btn">Left Click</div>
+      <div class="btn" id="right-btn">Right Click</div>
+    </div>
   </div>
 
 <script>
@@ -508,6 +610,158 @@ function bindButton(el, button) {
 }
 bindButton(leftBtn, 'left');
 bindButton(rightBtn, 'right');
+
+// --- Keyboard ---
+// Uses the phone's own keyboard via a hidden textarea. Rather than trying
+// to interpret individual key presses (mobile keyboards mostly don't
+// report them), every change to the textarea is diffed against its
+// previous contents and replayed on the Mac as backspaces + typed text.
+// That makes autocorrect, predictive text, swipe typing and dictation all
+// just work: a correction is "delete the old word, type the new one."
+const app = document.getElementById('app');
+const kbdBtn = document.getElementById('kbd-btn');
+const kbdTip = document.getElementById('kbd-tip');
+const kbdDone = document.getElementById('kbd-done');
+const kbdInput = document.getElementById('kbd-input');
+
+const KBD_HOLD_MS = 500;      // must match the ring's CSS transition
+const KBD_HOLD_SLOP_PX = 12;  // finger drift allowed while holding
+// The textarea always starts with this invisible character, so pressing
+// backspace has something to delete (an empty field fires no event).
+const SENTINEL = '\\u200B';
+const segmenter = window.Intl && Intl.Segmenter ? new Intl.Segmenter() : null;
+
+let kbdPrev = SENTINEL;
+
+function graphemes(s) {
+  // Split into user-visible characters, so one emoji = one backspace.
+  return segmenter ? Array.from(segmenter.segment(s), g => g.segment) : Array.from(s);
+}
+
+function resetKbdBuffer() {
+  kbdInput.value = SENTINEL;
+  kbdInput.setSelectionRange(SENTINEL.length, SENTINEL.length);
+  kbdPrev = SENTINEL;
+}
+
+kbdInput.addEventListener('input', () => {
+  const before = graphemes(kbdPrev);
+  const after = graphemes(kbdInput.value);
+  let i = 0;
+  while (i < before.length && i < after.length && before[i] === after[i]) i++;
+
+  const deleted = before.length - i;
+  if (deleted > 0) send({ type: 'key', key: 'backspace', count: deleted });
+
+  const lines = after.slice(i).join('').split(SENTINEL).join('').split('\\n');
+  lines.forEach((line, n) => {
+    if (n > 0) send({ type: 'key', key: 'return' });
+    if (line) send({ type: 'text', text: line });
+  });
+
+  kbdPrev = kbdInput.value;
+  // Start fresh after Return or once the backspace hit the sentinel; also
+  // keep the buffer from growing forever in one long paragraph.
+  if (lines.length > 1 || !kbdPrev.startsWith(SENTINEL) ||
+      (kbdPrev.length > 300 && /\\s$/.test(kbdPrev))) {
+    resetKbdBuffer();
+  }
+});
+
+function openKeyboard() {
+  // Must run synchronously inside a touch handler, or iOS won't show the keyboard.
+  resetKbdBuffer();
+  kbdInput.focus();
+}
+
+function closeKeyboard() {
+  kbdInput.blur();
+}
+
+// The "typing" state follows real focus, so dismissing the keyboard any
+// way at all (Done, the button, the keyboard's own hide key) closes it.
+kbdInput.addEventListener('focus', () => document.body.classList.add('typing'));
+kbdInput.addEventListener('blur', () => {
+  document.body.classList.remove('typing');
+  resetKbdBuffer();
+});
+
+let holdTimer = null;
+let holdOrigin = null;
+let holdReady = false;
+let tipTimer = null;
+
+function cancelHold() {
+  clearTimeout(holdTimer);
+  holdTimer = null;
+  holdOrigin = null;
+  holdReady = false;
+  kbdBtn.classList.remove('holding', 'ready');
+}
+
+function showTip() {
+  kbdTip.classList.add('show');
+  clearTimeout(tipTimer);
+  tipTimer = setTimeout(() => kbdTip.classList.remove('show'), 1500);
+}
+
+kbdBtn.addEventListener('touchstart', (e) => {
+  e.preventDefault();
+  if (document.body.classList.contains('typing')) return;  // tap to close, on touchend
+  const t = e.changedTouches[0];
+  holdOrigin = { x: t.clientX, y: t.clientY };
+  holdReady = false;
+  kbdBtn.classList.add('holding');
+  holdTimer = setTimeout(() => {
+    holdReady = true;
+    kbdBtn.classList.add('ready');
+    if (navigator.vibrate) navigator.vibrate(10);
+  }, KBD_HOLD_MS);
+}, { passive: false });
+
+kbdBtn.addEventListener('touchmove', (e) => {
+  e.preventDefault();
+  if (!holdOrigin) return;
+  const t = e.changedTouches[0];
+  if (Math.hypot(t.clientX - holdOrigin.x, t.clientY - holdOrigin.y) > KBD_HOLD_SLOP_PX) {
+    cancelHold();
+  }
+}, { passive: false });
+
+kbdBtn.addEventListener('touchend', (e) => {
+  e.preventDefault();
+  if (document.body.classList.contains('typing')) {
+    closeKeyboard();
+    return;
+  }
+  const wasHolding = holdOrigin !== null;
+  const ready = holdReady;
+  cancelHold();
+  // Opens on release after a full hold: the keyboard can only be summoned
+  // from a direct touch event, not from the hold timer.
+  if (ready) openKeyboard();
+  else if (wasHolding) showTip();
+}, { passive: false });
+
+kbdBtn.addEventListener('touchcancel', cancelHold);
+
+kbdDone.addEventListener('touchstart', (e) => e.preventDefault(), { passive: false });
+kbdDone.addEventListener('touchend', (e) => {
+  e.preventDefault();
+  closeKeyboard();
+}, { passive: false });
+
+// Fit the layout to the part of the screen the keyboard isn't covering.
+function fitToViewport() {
+  const vv = window.visualViewport;
+  if (!vv) return;
+  app.style.top = vv.offsetTop + 'px';
+  app.style.height = vv.height + 'px';
+}
+if (window.visualViewport) {
+  visualViewport.addEventListener('resize', fitToViewport);
+  visualViewport.addEventListener('scroll', fitToViewport);
+}
 </script>
 </body>
 </html>
