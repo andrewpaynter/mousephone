@@ -114,7 +114,6 @@ def get_desktop_bounds():
 
 class Mouse:
     def __init__(self):
-        self.min_x, self.min_y, self.max_x, self.max_y = get_desktop_bounds()
         self.x, self.y = self._current_location()
         self.dragging = False
 
@@ -123,8 +122,14 @@ class Mouse:
         return loc.x, loc.y
 
     def move(self, dx, dy):
-        self.x = min(max(self.x + dx, self.min_x), self.max_x - 1)
-        self.y = min(max(self.y + dy, self.min_y), self.max_y - 1)
+        # Recomputed on every move rather than cached at startup: monitors
+        # can be connected, disconnected, or rearranged while mousephone
+        # keeps running (it's a persistent menu-bar app), and a stale
+        # cached bound would make part of the desktop unreachable until
+        # restart.
+        min_x, min_y, max_x, max_y = get_desktop_bounds()
+        self.x = min(max(self.x + dx, min_x), max_x - 1)
+        self.y = min(max(self.y + dy, min_y), max_y - 1)
         event_type = kCGEventLeftMouseDragged if self.dragging else kCGEventMouseMoved
         event = CGEventCreateMouseEvent(
             None, event_type, (self.x, self.y), kCGMouseButtonLeft
