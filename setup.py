@@ -38,6 +38,9 @@ OPTIONS = {
         "frozenlist",
         "charset_normalizer",
     ],
+    # The Windows backend is only imported on Windows; keep it (and its
+    # dependencies) out of the Mac bundle.
+    "excludes": ["platforms.windows", "pystray"],
     "iconfile": "assets/mousephone.icns",
     "plist": {
         "CFBundleName": "mousephone",

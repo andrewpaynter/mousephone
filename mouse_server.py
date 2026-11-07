@@ -1,26 +1,29 @@
 #!/usr/bin/env python3
 """
-Phone-as-Mouse server for Mac.
+mousephone server — turns your phone into a trackpad and keyboard for
+your computer (macOS or Windows).
 
-Run this on your Mac, then open the printed URL in your phone's browser
-(while on the same Wi-Fi network) to use your phone as a trackpad.
+Run this on the computer, then open the printed URL in your phone's
+browser (on the same Wi-Fi network).
 
 Setup:
-    pip3 install aiohttp pyobjc-framework-Quartz "qrcode[pil]" rumps
+    macOS:   pip3 install aiohttp pyobjc-framework-Quartz "qrcode[pil]" rumps certifi
+    Windows: pip install aiohttp "qrcode[pil]" pystray certifi
 
 Run:
     python3 mouse_server.py
 
-You will likely need to grant Accessibility permission to Terminal (or
+On macOS you'll need to grant Accessibility permission to Terminal (or
 whatever app you run this from) in:
     System Settings > Privacy & Security > Accessibility
+
+Everything OS-specific lives in platforms/ (see platforms/base.py); this
+file is the shared part: the web server and the phone page.
 """
 
-import io
 import json
 import os
 import socket
-import subprocess
 import sys
 import threading
 
@@ -31,187 +34,20 @@ except ImportError:
     sys.exit(1)
 
 try:
-    from Quartz import (
-        CGEventCreateMouseEvent,
-        CGEventCreateScrollWheelEvent,
-        CGEventCreateKeyboardEvent,
-        CGEventKeyboardSetUnicodeString,
-        CGEventSetFlags,
-        CGEventPost,
-        CGEventCreate,
-        CGEventGetLocation,
-        CGMainDisplayID,
-        CGDisplayBounds,
-        CGGetActiveDisplayList,
-        kCGHIDEventTap,
-        kCGEventMouseMoved,
-        kCGEventLeftMouseDown,
-        kCGEventLeftMouseUp,
-        kCGEventLeftMouseDragged,
-        kCGEventRightMouseDown,
-        kCGEventRightMouseUp,
-        kCGMouseButtonLeft,
-        kCGMouseButtonRight,
-        kCGScrollEventUnitPixel,
-    )
-except ImportError:
-    print("Missing dependency. Install with:\n  pip3 install pyobjc-framework-Quartz")
-    sys.exit(1)
-
-try:
     import qrcode
 except ImportError:
     print("Missing dependency. Install with:\n  pip3 install \"qrcode[pil]\"")
     sys.exit(1)
 
-try:
-    import rumps
-except ImportError:
-    print("Missing dependency. Install with:\n  pip3 install rumps")
-    sys.exit(1)
-
-from AppKit import (
-    NSFont,
-    NSImage,
-    NSImageScaleProportionallyUpOrDown,
-    NSImageView,
-    NSMakeRect,
-    NSTextAlignmentCenter,
-    NSTextField,
-    NSView,
-)
-from Foundation import NSData
-from PyObjCTools import AppHelper
-
+import platforms
 import updater
 
-# Bump this in a PR before running tools/release.sh. setup.py reads it for
-# the app's Info.plist, and the updater compares it to the latest release.
+# Bump this in a PR before running tools/release.sh. The Mac and Windows
+# builds read it for their version metadata, and the updater compares it
+# to the latest release.
 __version__ = "1.2.0"
 
-UPDATE_CHECK_INTERVAL = 6 * 60 * 60  # seconds
-
 ASSETS_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "assets")
-MENU_BAR_ICON = os.path.join(ASSETS_DIR, "menu_bar_icon.png")
-
-
-def get_desktop_bounds():
-    """Union of every active display's bounds — not just the main one.
-    With an external monitor, the usable cursor area extends past the
-    main display's own width/height, in whichever direction the second
-    screen is arranged (often right and/or below)."""
-    max_displays = 16
-    err, display_ids, count = CGGetActiveDisplayList(max_displays, None, None)
-    if err != 0 or not display_ids:
-        bounds = CGDisplayBounds(CGMainDisplayID())
-        return (
-            bounds.origin.x,
-            bounds.origin.y,
-            bounds.origin.x + bounds.size.width,
-            bounds.origin.y + bounds.size.height,
-        )
-
-    min_x = min_y = float("inf")
-    max_x = max_y = float("-inf")
-    for display_id in display_ids[:count]:
-        b = CGDisplayBounds(display_id)
-        min_x = min(min_x, b.origin.x)
-        min_y = min(min_y, b.origin.y)
-        max_x = max(max_x, b.origin.x + b.size.width)
-        max_y = max(max_y, b.origin.y + b.size.height)
-    return min_x, min_y, max_x, max_y
-
-
-# ---------- Mouse control (macOS Quartz) ----------
-
-class Mouse:
-    def __init__(self):
-        self.x, self.y = self._current_location()
-        self.dragging = False
-
-    def _current_location(self):
-        loc = CGEventGetLocation(CGEventCreate(None))
-        return loc.x, loc.y
-
-    def move(self, dx, dy):
-        # Recomputed on every move rather than cached at startup: monitors
-        # can be connected, disconnected, or rearranged while mousephone
-        # keeps running (it's a persistent menu-bar app), and a stale
-        # cached bound would make part of the desktop unreachable until
-        # restart.
-        min_x, min_y, max_x, max_y = get_desktop_bounds()
-        self.x = min(max(self.x + dx, min_x), max_x - 1)
-        self.y = min(max(self.y + dy, min_y), max_y - 1)
-        event_type = kCGEventLeftMouseDragged if self.dragging else kCGEventMouseMoved
-        event = CGEventCreateMouseEvent(
-            None, event_type, (self.x, self.y), kCGMouseButtonLeft
-        )
-        CGEventPost(kCGHIDEventTap, event)
-
-    def click(self, button="left"):
-        if button == "left":
-            down, up, btn = kCGEventLeftMouseDown, kCGEventLeftMouseUp, kCGMouseButtonLeft
-        else:
-            down, up, btn = kCGEventRightMouseDown, kCGEventRightMouseUp, kCGMouseButtonRight
-        for etype in (down, up):
-            event = CGEventCreateMouseEvent(None, etype, (self.x, self.y), btn)
-            CGEventPost(kCGHIDEventTap, event)
-
-    def mouse_down(self):
-        self.dragging = True
-        event = CGEventCreateMouseEvent(
-            None, kCGEventLeftMouseDown, (self.x, self.y), kCGMouseButtonLeft
-        )
-        CGEventPost(kCGHIDEventTap, event)
-
-    def mouse_up(self):
-        self.dragging = False
-        event = CGEventCreateMouseEvent(
-            None, kCGEventLeftMouseUp, (self.x, self.y), kCGMouseButtonLeft
-        )
-        CGEventPost(kCGHIDEventTap, event)
-
-    def scroll(self, dx, dy):
-        event = CGEventCreateScrollWheelEvent(
-            None, kCGScrollEventUnitPixel, 2, int(dy), int(dx)
-        )
-        CGEventPost(kCGHIDEventTap, event)
-
-
-mouse = Mouse()
-
-
-# ---------- Keyboard (macOS Quartz) ----------
-
-# Virtual key codes for the few non-character keys the phone sends.
-KEY_CODES = {"backspace": 51, "return": 36}
-
-
-class Keyboard:
-    def type_text(self, text):
-        """Type arbitrary text (accents, emoji, any language) by attaching
-        the characters to a synthetic key event, rather than mapping each
-        one to a physical key on a particular keyboard layout."""
-        for ch in text:
-            length = len(ch.encode("utf-16-le")) // 2  # emoji are 2 UTF-16 units
-            for key_down in (True, False):
-                event = CGEventCreateKeyboardEvent(None, 0, key_down)
-                CGEventSetFlags(event, 0)  # ignore any modifiers held on the Mac
-                CGEventKeyboardSetUnicodeString(event, length, ch)
-                CGEventPost(kCGHIDEventTap, event)
-
-    def press(self, key, count=1):
-        code = KEY_CODES.get(key)
-        if code is None:
-            return
-        for _ in range(max(1, min(int(count), 500))):
-            for key_down in (True, False):
-                event = CGEventCreateKeyboardEvent(None, code, key_down)
-                CGEventSetFlags(event, 0)
-                CGEventPost(kCGHIDEventTap, event)
-
-
-keyboard = Keyboard()
 
 
 # ---------- Web server ----------
@@ -220,84 +56,48 @@ async def index(request):
     return web.Response(text=INDEX_HTML, content_type="text/html")
 
 
-async def websocket_handler(request):
-    ws = web.WebSocketResponse()
-    await ws.prepare(request)
+def make_websocket_handler(controller):
+    async def websocket_handler(request):
+        ws = web.WebSocketResponse()
+        await ws.prepare(request)
 
-    async for msg in ws:
-        if msg.type == WSMsgType.TEXT:
-            try:
-                data = json.loads(msg.data)
-            except ValueError:
-                continue
+        async for msg in ws:
+            if msg.type == WSMsgType.TEXT:
+                try:
+                    data = json.loads(msg.data)
+                except ValueError:
+                    continue
 
-            t = data.get("type")
-            if t == "move":
-                mouse.move(data.get("dx", 0), data.get("dy", 0))
-            elif t == "click":
-                mouse.click(data.get("button", "left"))
-            elif t == "down":
-                mouse.mouse_down()
-            elif t == "up":
-                mouse.mouse_up()
-            elif t == "scroll":
-                mouse.scroll(data.get("dx", 0), data.get("dy", 0))
-            elif t == "text":
-                keyboard.type_text(str(data.get("text", "")))
-            elif t == "key":
-                keyboard.press(data.get("key"), data.get("count", 1))
-        elif msg.type == WSMsgType.ERROR:
-            break
+                t = data.get("type")
+                if t == "move":
+                    controller.move(data.get("dx", 0), data.get("dy", 0))
+                elif t == "click":
+                    controller.click(data.get("button", "left"))
+                elif t == "down":
+                    controller.mouse_down()
+                elif t == "up":
+                    controller.mouse_up()
+                elif t == "scroll":
+                    controller.scroll(data.get("dx", 0), data.get("dy", 0))
+                elif t == "text":
+                    controller.type_text(str(data.get("text", "")))
+                elif t == "key":
+                    controller.press_key(data.get("key"), data.get("count", 1))
+            elif msg.type == WSMsgType.ERROR:
+                break
 
-    return ws
+        return ws
+
+    return websocket_handler
 
 
 def print_qr_ascii(url):
-    """Print a scannable QR code as text — visible when run from Terminal
-    or the .command launcher."""
+    """Print a scannable QR code as text — visible when run from a terminal.
+    (A windowed build has no stdout, which the caller tolerates.)"""
     qr = qrcode.QRCode(border=1)
     qr.add_data(url)
     qr.make()
     qr.print_ascii(invert=True)
-
-
-def build_qr_menu_item(url):
-    """A menu item whose body is the QR code image itself, so scanning it
-    is just: click the menu bar icon. No separate window, no Preview."""
-    qr_img = qrcode.make(url, box_size=6, border=2)
-    buf = io.BytesIO()
-    qr_img.save(buf, format="PNG")
-    data = NSData.dataWithBytes_length_(buf.getvalue(), len(buf.getvalue()))
-    ns_image = NSImage.alloc().initWithData_(data)
-
-    qr_size = 176
-    padding = 14
-    label_h = 18
-    view_w = qr_size + padding * 2
-    view_h = qr_size + padding * 2 + label_h
-
-    view = NSView.alloc().initWithFrame_(NSMakeRect(0, 0, view_w, view_h))
-
-    image_view = NSImageView.alloc().initWithFrame_(
-        NSMakeRect(padding, label_h, qr_size, qr_size)
-    )
-    image_view.setImage_(ns_image)
-    image_view.setImageScaling_(NSImageScaleProportionallyUpOrDown)
-    view.addSubview_(image_view)
-
-    label = NSTextField.alloc().initWithFrame_(NSMakeRect(0, 0, view_w, label_h))
-    label.setStringValue_(url)
-    label.setBezeled_(False)
-    label.setDrawsBackground_(False)
-    label.setEditable_(False)
-    label.setSelectable_(True)
-    label.setAlignment_(NSTextAlignmentCenter)
-    label.setFont_(NSFont.systemFontOfSize_(11))
-    view.addSubview_(label)
-
-    item = rumps.MenuItem("")
-    item._menuitem.setView_(view)
-    return item
 
 
 def get_local_ip():
@@ -768,52 +568,31 @@ if (window.visualViewport) {
 """
 
 
-def is_accessibility_trusted():
-    """Check Accessibility permission without needing an extra pip package —
-    calls AXIsProcessTrusted() straight from the system framework via ctypes."""
-    try:
-        import ctypes
-
-        app_services = ctypes.cdll.LoadLibrary(
-            "/System/Library/Frameworks/ApplicationServices.framework/ApplicationServices"
-        )
-        return bool(app_services.AXIsProcessTrusted())
-    except Exception:
-        return True  # can't check — don't block startup over it
-
-
-def open_accessibility_settings():
-    subprocess.run(
-        ["open", "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility"],
-        check=False,
-    )
-
-
 def main():
+    platform = platforms.current(ASSETS_DIR)
+    controller = platform.create_input()
+
     app = web.Application()
     app.router.add_get("/", index)
-    app.router.add_get("/ws", websocket_handler)
+    app.router.add_get("/ws", make_websocket_handler(controller))
 
     # dev.sh sets MOUSEPHONE_PORT so a dev server can run alongside the
     # installed app without fighting over the port.
     port = int(os.environ.get("MOUSEPHONE_PORT", 8765))
+    # dev.sh also sets MOUSEPHONE_DEV, so its tray/menu bar icon can be told
+    # apart from the installed app's when both are running.
+    dev = os.environ.get("MOUSEPHONE_DEV") == "1"
     ip = get_local_ip()
     url = f"http://{ip}:{port}"
 
     print("=" * 50)
-    print("Phone-as-Mouse server running")
+    print("mousephone server running")
     print(f"On your phone (same Wi-Fi), scan this QR code, or open:\n  {url}")
-    print("=" * 50)
-
-    trusted = is_accessibility_trusted()
-    if not trusted:
-        print("Accessibility permission NOT granted — the cursor will not move.")
-        print("System Settings > Privacy & Security > Accessibility")
     print("=" * 50)
 
     # Run the web/WebSocket server on a background thread. handle_signals=False
     # is required here — aiohttp's signal handling only works on the main
-    # thread, which we're reserving for the Cocoa run loop below.
+    # thread, which we're reserving for the tray/menu bar UI below.
     def _run_server():
         web.run_app(app, host="0.0.0.0", port=port, print=None, handle_signals=False)
 
@@ -824,159 +603,15 @@ def main():
     except Exception:
         pass
 
-    # Hand the main thread to a minimal Cocoa run loop via rumps. This is
-    # what makes the app respond to Launch Services at startup — without
-    # it, a double-clicked .app that never touches AppKit can trigger
-    # "You can't open mousephone.app because it is not responding," even
-    # though the server itself is running fine. It also adds a menu bar
-    # icon whose dropdown shows the QR code directly, so there's no need
-    # to open a separate image window to scan it.
-    class MousephoneApp(rumps.App):
-        def __init__(self):
-            # dev.sh sets MOUSEPHONE_DEV so its menu bar icon can be told
-            # apart from the installed app's when both are running.
-            dev = os.environ.get("MOUSEPHONE_DEV") == "1"
-            super().__init__(
-                "mousephone",
-                title="DEV" if dev else None,
-                icon=MENU_BAR_ICON,
-                template=True,
-                quit_button="Quit",
-            )
-            items = [build_qr_menu_item(url), None, "Check Accessibility Permission"]
+    tray = platform.create_tray(url, port, dev)
 
-            # Updates only apply to the built .app — under dev.sh there's
-            # no bundle to replace, so the menu item is left out entirely.
-            self.app_path = updater.current_app_path()
-            self.available_update = None
-            self.updating = False
-            if self.app_path:
-                self.update_item = rumps.MenuItem("Check for Updates", callback=self.update_clicked)
-                items.insert(2, self.update_item)
-                self.update_timer = rumps.Timer(self.background_check, UPDATE_CHECK_INTERVAL)
-                self.update_timer.start()
-                self.background_check()
-            if dev:
-                items[:0] = [rumps.MenuItem(f"Dev server \u00b7 port {port}"), None]
+    # Updates only apply to an installed build — when running from source
+    # there's nothing to replace, so the update menu item is left out.
+    installer = platform.create_installer()
+    if installer.current_install():
+        updater.UpdateController(tray, installer, __version__)
 
-            self.menu = items
-
-        # Network work runs on background threads; anything touching the
-        # menu or showing an alert is handed back to the main thread.
-        def background_check(self, _=None):
-            threading.Thread(target=self._check_for_update, args=(False,), daemon=True).start()
-
-        def _check_for_update(self, manual):
-            try:
-                update = updater.check_for_update(__version__)
-            except Exception:
-                if manual:
-                    AppHelper.callAfter(
-                        rumps.alert, title="mousephone",
-                        message="Couldn't check for updates. Check your internet connection and try again.",
-                    )
-                return
-            AppHelper.callAfter(self._on_check_result, update, manual)
-
-        def _on_check_result(self, update, manual):
-            if self.updating:
-                return
-            self.available_update = update
-            self.update_item.title = (
-                f"Update to v{update['version']}…" if update else "Check for Updates"
-            )
-            if manual:
-                if update:
-                    self._prompt_install()
-                else:
-                    rumps.alert(title="mousephone", message=f"You're up to date (v{__version__}).")
-
-        def update_clicked(self, _):
-            if self.updating:
-                return
-            if self.available_update:
-                self._prompt_install()
-            else:
-                threading.Thread(target=self._check_for_update, args=(True,), daemon=True).start()
-
-        def _prompt_install(self):
-            update = self.available_update
-            if not updater.can_install(self.app_path):
-                rumps.alert(
-                    title=f"mousephone {update['version']} is available",
-                    message=(
-                        "mousephone can't replace itself in its current folder. "
-                        "Download the new version from the release page and drag "
-                        "it into Applications."
-                    ),
-                )
-                subprocess.run(["open", update["page_url"]], check=False)
-                return
-            if rumps.alert(
-                title=f"Update to mousephone {update['version']}?",
-                message="mousephone will download the update and restart. It only takes a few seconds.",
-                ok="Update",
-                cancel="Not Now",
-            ) != 1:
-                return
-
-            self.updating = True
-            self.update_item.title = "Downloading update…"
-
-            def _download():
-                try:
-                    staging, new_app = updater.download_update(update, self.app_path)
-                except Exception as e:
-                    AppHelper.callAfter(self._on_install_failed, e)
-                    return
-                AppHelper.callAfter(self._finish_install, staging, new_app)
-
-            threading.Thread(target=_download, daemon=True).start()
-
-        def _finish_install(self, staging, new_app):
-            updater.install_and_relaunch(self.app_path, staging, new_app)
-            rumps.quit_application()
-
-        def _on_install_failed(self, error):
-            self.updating = False
-            self.update_item.title = f"Update to v{self.available_update['version']}…"
-            message = (
-                str(error) if isinstance(error, updater.UpdateError)
-                else "The download failed. Check your internet connection and try again."
-            )
-            rumps.alert(title="Update failed", message=message)
-
-        @rumps.clicked("Check Accessibility Permission")
-        def check_permission_clicked(self, _):
-            if is_accessibility_trusted():
-                rumps.alert(title="mousephone", message="Accessibility permission is granted. You're all set.")
-            else:
-                rumps.alert(
-                    title="Accessibility Permission Needed",
-                    message=(
-                        "mousephone can't move the cursor without this.\n\n"
-                        "In the Accessibility list, remove any existing "
-                        "\u201cmousephone\u201d entry first (select it, click \u2212), "
-                        "then add this app back and turn it on. Then quit and "
-                        "reopen mousephone."
-                    ),
-                )
-                open_accessibility_settings()
-
-    if not trusted:
-        rumps.alert(
-            title="Accessibility Permission Needed",
-            message=(
-                "mousephone can't move the cursor without this.\n\n"
-                "In the Accessibility list, remove any existing "
-                "\u201cmousephone\u201d entry first (select it, click \u2212), "
-                "then add this app back and turn it on. Then quit and "
-                "reopen mousephone."
-            ),
-        )
-        open_accessibility_settings()
-
-    MousephoneApp().run()
+    tray.run()
 
 
 if __name__ == "__main__":
