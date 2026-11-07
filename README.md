@@ -32,6 +32,9 @@ local IP address.
 | `dev.sh` | Dev loop — runs the server directly and auto-restarts on save |
 | `setup.py` | Build config for packaging into a real `.app` |
 | `build.sh` | One-time script that builds `dist/mousephone.app` |
+| `updater.py` | Checks GitHub Releases and installs updates from the menu bar |
+| `tools/create_signing_cert.sh` | One-time setup of the certificate every build is signed with |
+| `tools/release.sh` | Builds and publishes a GitHub Release that installed copies update to |
 
 ## Setup
 
@@ -61,9 +64,15 @@ Turns this into `mousephone.app`, which you can put in `/Applications` and
 launch like any other Mac app (no Terminal window).
 
 ```
-chmod +x build.sh
+tools/create_signing_cert.sh   # first time only
 ./build.sh
 ```
+
+`create_signing_cert.sh` adds a "mousephone Code Signing" certificate to
+your login keychain, and every build is signed with it. **Back it up**
+(Keychain Access → My Certificates → right-click it → Export): it's what
+lets updates keep their Accessibility permission, and installed copies
+only accept updates signed with it.
 
 This creates `dist/mousephone.app`. Drag it into `/Applications`.
 
@@ -75,9 +84,8 @@ normally.
 ## Development workflow
 
 If you're editing `mouse_server.py`, don't use `build.sh` for every change —
-building produces a freshly ad-hoc-signed `.app` each time, and macOS treats
-each signature as a different app, so you'd have to re-grant Accessibility
-permission after every single edit.
+a full build takes a few minutes, and you'd have to reinstall the `.app`
+each time.
 
 Instead:
 
@@ -94,8 +102,7 @@ every future edit, restart, and even new Terminal windows — no rebuild, no
 reinstall into `/Applications`, no re-granting.
 
 Reserve `build.sh` for when you actually want the packaged, double-click
-`.app` (e.g. to hand off or stop needing a Terminal window open) — and
-expect to re-grant permission once after that build, as noted below.
+`.app` (e.g. to hand off or stop needing a Terminal window open).
 
 ## Using it
 
@@ -111,6 +118,11 @@ expect to re-grant permission once after that build, as noted below.
    - **Two fingers, drag** — scroll
    - **Two fingers, tap** — right click
    - **Hold "Left Click," then drag** — click-and-drag
+4. To type, **press and hold** the keyboard button in the top-right corner
+   until its ring fills, then let go. Your phone's own keyboard opens and
+   everything you type (autocorrect, emoji, dictation included) is typed on
+   the Mac. Tap **Done**, tap the keyboard button again, or hide the
+   keyboard to close it. The trackpad keeps working while it's open.
 
 ## Accessibility permission
 
@@ -127,10 +139,12 @@ The app checks this on launch — if it's not granted, you'll get an alert
 and Settings will open automatically. You can also re-check anytime from
 the mousephone menu bar icon → **Check Accessibility Permission**.
 
-**After every rebuild of the `.app`,** re-grant this permission — each
-build produces a new signed binary, and macOS treats it as a different
-app. Remove the old "mousephone" entry from the list first (select it,
-click **−**) rather than just re-toggling it, then add the new build back
+Builds are all signed with the same certificate, so the permission
+carries over across rebuilds and updates. You only need to re-grant it
+when moving from an older ad-hoc-signed build (anything before the
+updater was added), or if the signing certificate is ever replaced. In
+that case, remove the old "mousephone" entry from the list first (select
+it, click **−**) rather than just re-toggling it, then add the app back
 with **+**.
 
 ## Troubleshooting
@@ -146,9 +160,9 @@ with **+**.
   are on the same Wi-Fi network (not one on Wi-Fi and one on cellular data),
   and that no VPN is active on either device.
 - **Cursor doesn't move (page loads and connects fine)** — almost always
-  Accessibility permission. See the section above — after any rebuild, the
-  old permission entry goes stale and needs to be removed and re-added,
-  not just re-toggled.
+  Accessibility permission. See the section above — if you've moved from
+  an older ad-hoc-signed build, the old permission entry is stale and
+  needs to be removed and re-added, not just re-toggled.
 - **"Address already in use" on launch** — another copy of the server is
   already running; quit it first (menu bar icon → Quit), or run it on a
   different port with `MOUSEPHONE_PORT=9000 python3 mouse_server.py`.
@@ -164,4 +178,24 @@ If you edit `mouse_server.py` and you're using the `.app` version, rerun
 `./build.sh` to pick up the changes — the app bundle is a snapshot taken at
 build time, not a live link to the script. If you're actively iterating on
 `mouse_server.py`, use `./dev.sh` instead (see **Development workflow**
-above) so you're not rebuilding and re-granting permission on every change.
+above) so you're not rebuilding on every change.
+
+## Updates
+
+The built `.app` checks this repo's GitHub Releases when it launches and
+every 6 hours. When a newer version is out, the menu bar icon shows
+**Update to vX…** — click it, and mousephone downloads the update, checks
+it's signed with the same certificate, swaps it in and relaunches. You can
+also check anytime from **Check for Updates**. (Not shown under `dev.sh`,
+since there's no app bundle to update.)
+
+To publish an update:
+
+1. Bump `__version__` near the top of `mouse_server.py` in a PR and merge it.
+2. From an up-to-date `main`, run `tools/release.sh`. It builds and signs
+   the app, tags the commit, and creates a GitHub Release with the zipped
+   app attached — that release is what installed copies update to.
+
+For a friend's first install, send them the `.zip` from the latest
+release. They'll get the "unidentified developer" prompt once (see
+Option B above); updates after that install without it.
