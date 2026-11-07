@@ -5,6 +5,7 @@ for the UI, and an Authenticode-verified Inno Setup installer for updates.
 
 import ctypes
 import os
+import socket
 import subprocess
 import sys
 import tempfile
@@ -30,6 +31,11 @@ class WindowsPlatform(Platform):
     def __init__(self, assets_dir):
         super().__init__(assets_dir)
         _enable_dpi_awareness()
+
+    def computer_name(self):
+        # Windows has no separate friendly name: this is the "Device name"
+        # in Settings > System > About.
+        return os.environ.get("COMPUTERNAME") or socket.gethostname()
 
     def data_dir(self):
         return os.path.join(os.environ.get("APPDATA") or os.path.expanduser("~"), "mousephone")

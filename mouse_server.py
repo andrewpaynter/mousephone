@@ -21,6 +21,7 @@ Everything OS-specific lives in platforms/ (see platforms/base.py); this
 file is the shared part: the web server and the phone page.
 """
 
+import html
 import json
 import os
 import socket
@@ -53,8 +54,15 @@ ASSETS_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "assets")
 
 # ---------- Web server ----------
 
-async def index(request):
-    return web.Response(text=INDEX_HTML, content_type="text/html")
+def make_index_handler(computer_name):
+    # Rendered once: the name only changes if someone renames the computer,
+    # which a restart picks up.
+    page = INDEX_HTML.replace("{{COMPUTER_NAME}}", html.escape(computer_name))
+
+    async def index(request):
+        return web.Response(text=page, content_type="text/html")
+
+    return index
 
 
 def make_websocket_handler(controller, settings):
@@ -122,7 +130,7 @@ INDEX_HTML = """<!DOCTYPE html>
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
-<title>mousephone</title>
+<title>mousephone · {{COMPUTER_NAME}}</title>
 <style>
   html, body {
     margin: 0; padding: 0; height: 100%; width: 100%;
@@ -133,8 +141,10 @@ INDEX_HTML = """<!DOCTYPE html>
      layout shrinks to fit above the phone's keyboard instead of being
      covered by it. */
   #app { position: fixed; top: 0; left: 0; right: 0; height: 100%; }
+  /* Side padding keeps a long computer name clear of the keyboard button. */
   #status {
-    position: absolute; top: 8px; left: 0; right: 0; text-align: center;
+    position: absolute; top: 8px; left: 0; right: 0; padding: 0 72px;
+    text-align: center; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
     font-size: 13px; color: #888; z-index: 10; pointer-events: none;
   }
   #hint {
@@ -184,6 +194,7 @@ INDEX_HTML = """<!DOCTYPE html>
     font-size: 14px; color: #888;
   }
   body.typing #kbd-bar { display: flex; }
+  #kbd-label { min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
   #kbd-done {
     height: 100%; padding: 0 24px; display: flex; align-items: center;
     color: #0a84ff; font-size: 17px; font-weight: 600;
@@ -204,10 +215,10 @@ INDEX_HTML = """<!DOCTYPE html>
   #left-btn { border-right: 1px solid #444; }
 </style>
 </head>
-<body>
+<body data-computer="{{COMPUTER_NAME}}">
   <textarea id="kbd-input" autocomplete="off" autocapitalize="sentences"></textarea>
   <div id="app">
-    <div id="status">connecting…</div>
+    <div id="status">Connecting to {{COMPUTER_NAME}}…</div>
     <div id="trackpad"><div id="hint">1 finger: move &middot; 2 fingers: scroll &middot; tap: click</div></div>
     <div id="kbd-btn" aria-label="Hold to open keyboard">
       <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round">
@@ -217,7 +228,7 @@ INDEX_HTML = """<!DOCTYPE html>
       <svg class="ring" viewBox="0 0 56 56"><rect x="2" y="2" width="52" height="52" rx="16"/></svg>
     </div>
     <div id="kbd-tip">Hold to open keyboard</div>
-    <div id="kbd-bar">Typing on computer<div id="kbd-done">Done</div></div>
+    <div id="kbd-bar"><span id="kbd-label">Typing on {{COMPUTER_NAME}}</span><div id="kbd-done">Done</div></div>
     <div id="buttons">
       <div class="btn" id="left-btn">Left Click</div>
       <div class="btn" id="right-btn">Right Click</div>
@@ -226,6 +237,9 @@ INDEX_HTML = """<!DOCTYPE html>
 
 <script>
 const statusEl = document.getElementById('status');
+// Which computer this page controls, so it's clear when several on the
+// same network run mousephone.
+const COMPUTER_NAME = document.body.dataset.computer;
 const trackpad = document.getElementById('trackpad');
 const leftBtn = document.getElementById('left-btn');
 const rightBtn = document.getElementById('right-btn');
@@ -236,9 +250,9 @@ const rightBtn = document.getElementById('right-btn');
 let ws;
 function connect() {
   ws = new WebSocket(`ws://${location.host}/ws`);
-  ws.onopen = () => statusEl.textContent = 'connected';
+  ws.onopen = () => statusEl.textContent = `Connected to ${COMPUTER_NAME}`;
   ws.onclose = () => {
-    statusEl.textContent = 'disconnected — retrying…';
+    statusEl.textContent = `Disconnected from ${COMPUTER_NAME} — retrying…`;
     setTimeout(connect, 1500);
   };
   ws.onerror = () => ws.close();
@@ -579,7 +593,7 @@ def main():
     settings = speed_settings.Settings(platform.data_dir())
 
     app = web.Application()
-    app.router.add_get("/", index)
+    app.router.add_get("/", make_index_handler(platform.computer_name()))
     app.router.add_get("/ws", make_websocket_handler(controller, settings))
 
     # dev.sh sets MOUSEPHONE_PORT so a dev server can run alongside the

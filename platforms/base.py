@@ -139,6 +139,11 @@ class Platform(ABC):
         self.assets_dir = assets_dir
 
     @abstractmethod
+    def computer_name(self):
+        """The name people know this computer by, shown on the phone so it's
+        clear which computer it's controlling."""
+
+    @abstractmethod
     def data_dir(self):
         """Folder for the app's saved settings, in the OS's usual place for
         per-user app data. Shared by the installed app and dev runs."""
