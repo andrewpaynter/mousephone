@@ -87,7 +87,7 @@ import updater
 
 # Bump this in a PR before running tools/release.sh. setup.py reads it for
 # the app's Info.plist, and the updater compares it to the latest release.
-__version__ = "1.1.0"
+__version__ = "1.2.0"
 
 UPDATE_CHECK_INTERVAL = 6 * 60 * 60  # seconds
 
