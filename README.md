@@ -243,8 +243,10 @@ with **+**.
   installed app (8765).
 - **Feels too fast / slow** — pick a different **Pointer Speed** or
   **Scroll Speed** from the menu bar / tray icon. It applies right away and
-  is remembered. (To change what "Normal" means, edit `BASE_POINTER` and
-  `BASE_SCROLL` in `settings.py`.)
+  is remembered. Turn on **Pointer Acceleration** to have quick flicks
+  carry the cursor farther while slow movements stay precise. (To change
+  what "Normal" means, or the acceleration curve, edit the constants at
+  the top of `settings.py`.)
 
 ## Rebuilding after changes
 

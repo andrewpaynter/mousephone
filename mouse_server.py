@@ -61,6 +61,7 @@ def make_websocket_handler(controller, settings):
     async def websocket_handler(request):
         ws = web.WebSocketResponse()
         await ws.prepare(request)
+        accelerator = speed_settings.PointerAccelerator(settings)
 
         async for msg in ws:
             if msg.type == WSMsgType.TEXT:
@@ -71,8 +72,9 @@ def make_websocket_handler(controller, settings):
 
                 t = data.get("type")
                 if t == "move":
-                    scale = settings.pointer_scale
-                    controller.move(data.get("dx", 0) * scale, data.get("dy", 0) * scale)
+                    dx, dy = data.get("dx", 0), data.get("dy", 0)
+                    scale = settings.pointer_scale * accelerator.gain(dx, dy, data.get("dt"))
+                    controller.move(dx * scale, dy * scale)
                 elif t == "click":
                     controller.click(data.get("button", "left"))
                 elif t == "down":
@@ -322,7 +324,7 @@ trackpad.addEventListener('touchstart', (e) => {
   document.getElementById('hint').style.display = 'none';
   stopMomentum();
   for (const t of e.changedTouches) {
-    touches[t.identifier] = { x: t.clientX, y: t.clientY };
+    touches[t.identifier] = { x: t.clientX, y: t.clientY, t: e.timeStamp };
   }
   const count = Object.keys(touches).length;
   maxTouchCount = Math.max(maxTouchCount, count);
@@ -347,8 +349,12 @@ trackpad.addEventListener('touchmove', (e) => {
     const dx = t.clientX - prev.x;
     const dy = t.clientY - prev.y;
     if (Math.abs(dx) + Math.abs(dy) > 3) moved = true;
-    send({ type: 'move', dx, dy });
-    touches[id] = { x: t.clientX, y: t.clientY };
+    // dt (ms since the previous event) lets the computer apply pointer
+    // acceleration from the finger's real speed; Wi-Fi delivers messages
+    // too unevenly for it to time them itself.
+    const dt = e.timeStamp - prev.t;
+    send({ type: 'move', dx, dy, dt });
+    touches[id] = { x: t.clientX, y: t.clientY, t: e.timeStamp };
   } else if (ids.length === 2) {
     let dxSum = 0, dySum = 0, n = 0;
     for (const t of e.touches) {
@@ -356,7 +362,7 @@ trackpad.addEventListener('touchmove', (e) => {
       if (touches[id]) {
         dxSum += t.clientX - touches[id].x;
         dySum += t.clientY - touches[id].y;
-        touches[id] = { x: t.clientX, y: t.clientY };
+        touches[id] = { x: t.clientX, y: t.clientY, t: e.timeStamp };
         n++;
       }
     }
@@ -604,9 +610,12 @@ def main():
         pass
 
     tray = platform.create_tray(url, port, dev)
-    labels = [label for label, _ in speed_settings.SPEEDS]
-    tray.add_choice_menu("Pointer Speed", labels, settings.pointer_speed, settings.set_pointer_speed)
-    tray.add_choice_menu("Scroll Speed", labels, settings.scroll_speed, settings.set_scroll_speed)
+    for title, name in [
+        ("Pointer Speed", "pointer_speed"),
+        ("Pointer Acceleration", "acceleration"),
+        ("Scroll Speed", "scroll_speed"),
+    ]:
+        tray.add_choice_menu(title, settings.choices(name), settings.values[name], settings.setter(name))
 
     # Updates only apply to an installed build — when running from source
     # there's nothing to replace, so the update menu item is left out.
