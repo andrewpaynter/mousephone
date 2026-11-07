@@ -1,6 +1,8 @@
 #!/bin/bash
 # Publishes a GitHub Release that installed copies of mousephone will
-# offer as an update.
+# offer as an update. This builds and attaches the Mac app; publishing the
+# release then triggers GitHub Actions to build and attach the Windows
+# installer (.github/workflows/windows.yml).
 #
 # Bump __version__ in mouse_server.py through a normal PR first, merge
 # it, then run this from an up-to-date main:
@@ -47,5 +49,8 @@ git push origin "$TAG"
 gh release create "$TAG" "$ZIP" --title "mousephone $VERSION" --generate-notes
 
 echo ""
-echo "Released $TAG. Installed copies will offer the update within a few"
-echo "hours, or right away via the menu bar icon > Check for Updates."
+echo "Released $TAG with the Mac app. The Windows installer is building on"
+echo "GitHub Actions and gets attached when it's done (a few minutes):"
+echo "  gh run list --workflow windows.yml --limit 1"
+echo "Installed copies offer the update within a few hours, or right away"
+echo "via the menu bar / tray icon > Check for Updates."

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
-Generates mousephone's logo assets: the menu bar status icon and the
-app bundle .icns. Not needed to run the app -- only re-run this if the
+Generates mousephone's logo assets: the menu bar status icon, the app
+bundle .icns, and the Windows .ico (used for the .exe and the tray icon). Not needed to run the app -- only re-run this if the
 mark itself needs to change.
 
     python3 tools/generate_icon.py
@@ -147,6 +147,16 @@ def build_icns():
     print(f"wrote {icns_path}")
 
 
+def build_ico():
+    # Windows doesn't re-tint tray icons the way macOS does template images,
+    # so the tray uses the full-color app icon, which reads on both light
+    # and dark taskbars.
+    path = os.path.join(ASSETS, "mousephone.ico")
+    sizes = [16, 20, 24, 32, 40, 48, 64, 128, 256]
+    render_app_icon(256).save(path, sizes=[(s, s) for s in sizes])
+    print(f"wrote {path}")
+
+
 def build_preview():
     """A big flat PNG of both marks, side by side, purely for eyeballing
     the design -- not shipped with the app."""
@@ -165,4 +175,5 @@ if __name__ == "__main__":
     os.makedirs(ASSETS, exist_ok=True)
     build_menu_bar_icon()
     build_icns()
+    build_ico()
     build_preview()

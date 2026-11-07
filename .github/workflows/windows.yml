@@ -1,0 +1,83 @@
+# Builds the Windows installer. Mac builds happen locally (tools/release.sh),
+# but PyInstaller can't cross-compile, so Windows builds happen here.
+#
+# - On every pull request: builds the installer and attaches it to the run
+#   as a downloadable artifact, for testing before merging.
+# - When tools/release.sh publishes a release: builds from the release tag
+#   and uploads the installer to that release, where installed Windows
+#   copies pick it up as their update.
+#
+# Signing uses two repo secrets, created by tools/create_windows_signing_cert.sh:
+#   WINDOWS_SIGNING_PFX_BASE64, WINDOWS_SIGNING_PASSWORD
+# Release builds fail without them; pull request builds fall back to unsigned.
+
+name: Windows build
+
+on:
+  pull_request:
+  release:
+    types: [published]
+  workflow_dispatch:
+
+permissions:
+  contents: write  # to upload the installer to a release
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install Inno Setup
+        shell: pwsh
+        run: |
+          if (-not (Get-Command iscc.exe -ErrorAction SilentlyContinue) -and
+              -not (Test-Path "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe")) {
+            choco install innosetup --no-progress -y
+          }
+
+      - name: Build installer
+        shell: pwsh
+        env:
+          SIGNING_PFX_BASE64: ${{ secrets.WINDOWS_SIGNING_PFX_BASE64 }}
+          MOUSEPHONE_SIGNING_PASSWORD: ${{ secrets.WINDOWS_SIGNING_PASSWORD }}
+        run: |
+          if ($env:SIGNING_PFX_BASE64) {
+            $pfx = Join-Path $env:RUNNER_TEMP "signing.pfx"
+            [IO.File]::WriteAllBytes($pfx, [Convert]::FromBase64String($env:SIGNING_PFX_BASE64))
+            $env:MOUSEPHONE_SIGNING_PFX = $pfx
+            ./build_windows.ps1
+          } elseif ("${{ github.event_name }}" -eq "release") {
+            throw "The WINDOWS_SIGNING_PFX_BASE64 secret is missing; release builds must be signed."
+          } else {
+            Write-Host "::warning::No signing secret; building unsigned. This build can't install updates."
+            ./build_windows.ps1 -Unsigned
+          }
+
+      - name: Check signature
+        if: ${{ github.event_name == 'release' }}
+        shell: pwsh
+        run: |
+          Get-ChildItem dist\*-windows-setup.exe, dist\mousephone\mousephone.exe | ForEach-Object {
+            $s = Get-AuthenticodeSignature -LiteralPath $_.FullName
+            if (-not $s.SignerCertificate) { throw "$($_.Name) isn't signed." }
+            Write-Host "$($_.Name): $($s.Status) $($s.SignerCertificate.Thumbprint)"
+          }
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: mousephone-windows-setup
+          path: dist/*-windows-setup.exe
+
+      - name: Upload to release
+        if: ${{ github.event_name == 'release' }}
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $setup = (Get-ChildItem dist\*-windows-setup.exe).FullName
+          gh release upload "${{ github.event.release.tag_name }}" $setup

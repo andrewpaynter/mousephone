@@ -1,33 +1,40 @@
 # mousephone
 
-Turn your phone into a wireless trackpad for your Mac. No app to install on
-the phone — just open a page in its browser (or scan a QR code) over your
-home Wi-Fi.
+Turn your phone into a wireless trackpad and keyboard for your Mac or
+Windows PC. No app to install on the phone — just open a page in its
+browser (or scan a QR code) over your home Wi-Fi.
 
 Built with Claude Code
 
 ## How it works
 
-`mouse_server.py` runs a small local web server on your Mac. It serves a
-touch-friendly trackpad page and opens a WebSocket connection back to your
-phone. Touch gestures on the phone are sent over that connection and
-translated into real cursor movement using macOS's Quartz Event Services —
-the same low-level APIs remote-control and accessibility tools use.
+`mouse_server.py` runs a small local web server on your computer. It
+serves a touch-friendly trackpad page and opens a WebSocket connection back
+to your phone. Touch gestures on the phone are sent over that connection and
+translated into real cursor movement and typing — using Quartz Event
+Services on macOS and `SendInput` on Windows, the same low-level APIs
+remote-control and accessibility tools use.
 
-Nothing leaves your local network — the phone only ever talks to your Mac's
-local IP address.
+Nothing leaves your local network — the phone only ever talks to your
+computer's local IP address.
+
+Everything OS-specific lives in `platforms/`: `platforms/base.py` defines
+the interfaces (input, the tray/menu bar UI, and how updates are
+installed), and `mac.py` / `windows.py` implement them. The server, phone
+page and update flow are shared and only talk to those interfaces.
 
 ## Requirements
 
-- A Mac
+- A Mac, or a Windows 10/11 PC (see **Windows** below)
 - Python 3 (macOS usually has this already; check with `python3 --version`)
-- A phone and Mac on the **same Wi-Fi network**
+- A phone and computer on the **same Wi-Fi network**
 
 ## Files
 
 | File | Purpose |
 |---|---|
-| `mouse_server.py` | The server itself — this is all you actually need to run |
+| `mouse_server.py` | The shared server and phone page — run this to start mousephone |
+| `platforms/` | OS-specific code behind shared interfaces (`base.py`, `mac.py`, `windows.py`) |
 | `mousephone.command` | Double-click launcher (quick option, no build step) |
 | `dev.sh` | Dev loop — runs the server directly and auto-restarts on save |
 | `setup.py` | Build config for packaging into a real `.app` |
@@ -35,6 +42,10 @@ local IP address.
 | `updater.py` | Checks GitHub Releases and installs updates from the menu bar |
 | `tools/create_signing_cert.sh` | One-time setup of the certificate every build is signed with |
 | `tools/release.sh` | Builds and publishes a GitHub Release that installed copies update to |
+| `build_windows.ps1` | Builds the Windows installer (run on Windows; releases use GitHub Actions) |
+| `installer/mousephone.iss` | Inno Setup config for the Windows installer |
+| `.github/workflows/windows.yml` | Builds the Windows installer on PRs and attaches it to releases |
+| `tools/create_windows_signing_cert.sh` | One-time setup of the certificate Windows builds are signed with |
 
 ## Setup
 
@@ -80,6 +91,68 @@ This creates `dist/mousephone.app`. Drag it into `/Applications`.
 developer account, macOS will say it's from an "unidentified developer."
 Right-click the app → **Open** → **Open** to allow it. After that it opens
 normally.
+
+## Windows
+
+### Installing
+
+Download `mousephone-<version>-windows-setup.exe` from the
+[latest release](https://github.com/andrewpaynter/mousephone/releases/latest)
+and run it. It installs just for your user (no admin needed) and adds
+mousephone to the Start menu.
+
+- **"Windows protected your PC"** — SmartScreen shows this for apps without
+  a paid code-signing certificate. Click **More info → Run anyway**. Only
+  the first install; updates don't show it.
+- **Firewall prompt** — the first time mousephone runs, Windows asks
+  whether to allow it on the network. Allow it on **private networks**. If
+  your Wi-Fi is set to *Public*, the phone can't connect: Settings →
+  Network & internet → Wi-Fi → your network → **Private network**.
+
+mousephone lives in the system tray. Windows 11 tucks new tray icons into
+the **^** overflow menu, so the QR code also opens automatically on launch;
+click the tray icon to show it again.
+
+### Running from source
+
+```
+pip install aiohttp "qrcode[pil]" pystray certifi
+python mouse_server.py
+```
+
+Set `MOUSEPHONE_PORT=8766` and `MOUSEPHONE_DEV=1` (what `dev.sh` does on a
+Mac) to run alongside the installed app, labeled DEV in the tray.
+
+### Limitations
+
+- **Admin windows** — Windows blocks simulated input to apps running as
+  administrator (Task Manager, installers, elevated terminals), so the
+  cursor and keyboard stop working over those windows.
+- **Scrolling** — Windows' wheel scrolling is coarser than macOS's pixel
+  scrolling. Apps with smooth scrolling (browsers, most modern apps) feel
+  fine; older ones scroll in steps. Tune `WHEEL_UNITS_PER_PIXEL` in
+  `platforms/windows.py` if it feels off.
+
+### Building
+
+Releases are built by GitHub Actions — `tools/release.sh` publishes the
+release with the Mac app, which triggers `.github/workflows/windows.yml` to
+build the Windows installer and attach it. Every pull request also builds
+one, downloadable from the PR's checks, for testing before merging.
+
+Like the Mac app, Windows builds are signed with the same certificate every
+time, and the updater only installs updates signed with it. Create it once
+(on a Mac) and store it as repo secrets:
+
+```
+tools/create_windows_signing_cert.sh --upload
+```
+
+**Back up** the folder it creates (`~/mousephone-windows-signing`).
+
+To build locally on Windows: `powershell -ExecutionPolicy Bypass -File
+build_windows.ps1` (needs Python 3.11+ and Inno Setup 6; pass `-Unsigned`
+for a quick test build without the certificate).
 
 ## Development workflow
 
@@ -182,20 +255,24 @@ above) so you're not rebuilding on every change.
 
 ## Updates
 
-The built `.app` checks this repo's GitHub Releases when it launches and
-every 6 hours. When a newer version is out, the menu bar icon shows
-**Update to vX…** — click it, and mousephone downloads the update, checks
-it's signed with the same certificate, swaps it in and relaunches. You can
-also check anytime from **Check for Updates**. (Not shown under `dev.sh`,
-since there's no app bundle to update.)
+The installed app (the Mac `.app` or the Windows install) checks this
+repo's GitHub Releases when it launches and every 6 hours. When a newer
+version is out, the menu bar / tray icon shows **Update to vX…** — click
+it, and mousephone downloads the update, checks it's signed with the same
+certificate, installs it and relaunches. You can also check anytime from
+**Check for Updates**. (Not shown when running from source, since there's
+no installed app to update.)
 
 To publish an update:
 
 1. Bump `__version__` near the top of `mouse_server.py` in a PR and merge it.
 2. From an up-to-date `main`, run `tools/release.sh`. It builds and signs
-   the app, tags the commit, and creates a GitHub Release with the zipped
-   app attached — that release is what installed copies update to.
+   the Mac app, tags the commit, and creates a GitHub Release with the
+   zipped app attached. GitHub Actions then builds the Windows installer
+   and attaches it to the same release a few minutes later. That release
+   is what installed copies update to.
 
-For a friend's first install, send them the `.zip` from the latest
-release. They'll get the "unidentified developer" prompt once (see
-Option B above); updates after that install without it.
+For a friend's first install, send them the latest release's `.zip` (Mac)
+or `-windows-setup.exe` (Windows). They'll get the "unidentified
+developer" (Mac, see Option B above) or SmartScreen (Windows, see
+**Windows** above) prompt once; updates after that install without it.
