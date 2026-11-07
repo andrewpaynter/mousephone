@@ -118,6 +118,11 @@ Reserve `build.sh` for when you actually want the packaged, double-click
    - **Two fingers, drag** — scroll
    - **Two fingers, tap** — right click
    - **Hold "Left Click," then drag** — click-and-drag
+4. To type, **press and hold** the keyboard button in the top-right corner
+   until its ring fills, then let go. Your phone's own keyboard opens and
+   everything you type (autocorrect, emoji, dictation included) is typed on
+   the Mac. Tap **Done**, tap the keyboard button again, or hide the
+   keyboard to close it. The trackpad keeps working while it's open.
 
 ## Accessibility permission
 
