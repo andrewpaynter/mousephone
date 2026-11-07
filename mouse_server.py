@@ -78,6 +78,15 @@ from AppKit import (
     NSView,
 )
 from Foundation import NSData
+from PyObjCTools import AppHelper
+
+import updater
+
+# Bump this in a PR before running tools/release.sh. setup.py reads it for
+# the app's Info.plist, and the updater compares it to the latest release.
+__version__ = "1.1.0"
+
+UPDATE_CHECK_INTERVAL = 6 * 60 * 60  # seconds
 
 ASSETS_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "assets")
 MENU_BAR_ICON = os.path.join(ASSETS_DIR, "menu_bar_icon.png")
@@ -571,7 +580,106 @@ def main():
             super().__init__(
                 "mousephone", icon=MENU_BAR_ICON, template=True, quit_button="Quit"
             )
-            self.menu = [build_qr_menu_item(url), None, "Check Accessibility Permission"]
+            items = [build_qr_menu_item(url), None, "Check Accessibility Permission"]
+
+            # Updates only apply to the built .app — under dev.sh there's
+            # no bundle to replace, so the menu item is left out entirely.
+            self.app_path = updater.current_app_path()
+            self.available_update = None
+            self.updating = False
+            if self.app_path:
+                self.update_item = rumps.MenuItem("Check for Updates", callback=self.update_clicked)
+                items.insert(2, self.update_item)
+                self.update_timer = rumps.Timer(self.background_check, UPDATE_CHECK_INTERVAL)
+                self.update_timer.start()
+                self.background_check()
+
+            self.menu = items
+
+        # Network work runs on background threads; anything touching the
+        # menu or showing an alert is handed back to the main thread.
+        def background_check(self, _=None):
+            threading.Thread(target=self._check_for_update, args=(False,), daemon=True).start()
+
+        def _check_for_update(self, manual):
+            try:
+                update = updater.check_for_update(__version__)
+            except Exception:
+                if manual:
+                    AppHelper.callAfter(
+                        rumps.alert, title="mousephone",
+                        message="Couldn't check for updates. Check your internet connection and try again.",
+                    )
+                return
+            AppHelper.callAfter(self._on_check_result, update, manual)
+
+        def _on_check_result(self, update, manual):
+            if self.updating:
+                return
+            self.available_update = update
+            self.update_item.title = (
+                f"Update to v{update['version']}…" if update else "Check for Updates"
+            )
+            if manual:
+                if update:
+                    self._prompt_install()
+                else:
+                    rumps.alert(title="mousephone", message=f"You're up to date (v{__version__}).")
+
+        def update_clicked(self, _):
+            if self.updating:
+                return
+            if self.available_update:
+                self._prompt_install()
+            else:
+                threading.Thread(target=self._check_for_update, args=(True,), daemon=True).start()
+
+        def _prompt_install(self):
+            update = self.available_update
+            if not updater.can_install(self.app_path):
+                rumps.alert(
+                    title=f"mousephone {update['version']} is available",
+                    message=(
+                        "mousephone can't replace itself in its current folder. "
+                        "Download the new version from the release page and drag "
+                        "it into Applications."
+                    ),
+                )
+                subprocess.run(["open", update["page_url"]], check=False)
+                return
+            if rumps.alert(
+                title=f"Update to mousephone {update['version']}?",
+                message="mousephone will download the update and restart. It only takes a few seconds.",
+                ok="Update",
+                cancel="Not Now",
+            ) != 1:
+                return
+
+            self.updating = True
+            self.update_item.title = "Downloading update…"
+
+            def _download():
+                try:
+                    staging, new_app = updater.download_update(update, self.app_path)
+                except Exception as e:
+                    AppHelper.callAfter(self._on_install_failed, e)
+                    return
+                AppHelper.callAfter(self._finish_install, staging, new_app)
+
+            threading.Thread(target=_download, daemon=True).start()
+
+        def _finish_install(self, staging, new_app):
+            updater.install_and_relaunch(self.app_path, staging, new_app)
+            rumps.quit_application()
+
+        def _on_install_failed(self, error):
+            self.updating = False
+            self.update_item.title = f"Update to v{self.available_update['version']}…"
+            message = (
+                str(error) if isinstance(error, updater.UpdateError)
+                else "The download failed. Check your internet connection and try again."
+            )
+            rumps.alert(title="Update failed", message=message)
 
         @rumps.clicked("Check Accessibility Permission")
         def check_permission_clicked(self, _):
