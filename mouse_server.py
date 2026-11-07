@@ -46,7 +46,7 @@ import updater
 # Bump this in a PR before running tools/release.sh. The Mac and Windows
 # builds read it for their version metadata, and the updater compares it
 # to the latest release.
-__version__ = "1.2.0"
+__version__ = "1.3.0"
 
 ASSETS_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "assets")
 
